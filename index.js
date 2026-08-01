@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.13';
+const VERSION = '1.3.14';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -32,6 +32,9 @@ const DEFAULT_SETTINGS = Object.freeze({
     aiOutputTokens: DEFAULT_AI_OUTPUT_TOKENS,
     tokenScope: 'active',
     entryFilter: 'all',
+    quickOptionsLocation: 'lorebook',
+    tokenSummaryCollapsed: false,
+    entryFiltersCollapsed: false,
     translateMissingOnOpen: true,
     autoTranslateSource: true,
     autoSyncToSource: true,
@@ -98,6 +101,9 @@ function getSettings() {
     }
 
     settings.aiOutputTokens = normalizeAIOutputTokens(settings.aiOutputTokens);
+    settings.quickOptionsLocation = settings.quickOptionsLocation === 'extension' ? 'extension' : 'lorebook';
+    settings.tokenSummaryCollapsed = Boolean(settings.tokenSummaryCollapsed);
+    settings.entryFiltersCollapsed = Boolean(settings.entryFiltersCollapsed);
 
     return settings;
 }
@@ -439,6 +445,7 @@ async function translateText(source, onProgress = null) {
     const customPrompt = settings.translationPrompt?.trim();
     const prompt = [
         `Translate the lorebook entry below into ${language}.`,
+        'Translate naturally and fluently to fit the context, tone, relationships, and speaking style. Avoid stiff word-for-word translation.',
         // 사용자 추가 지시문 — 번역 언어는 위 기본 지시가 자동으로 지정하므로
         // 여기에는 문체·존칭·용어 같은 요구사항만 들어간다.
         customPrompt || null,
@@ -878,6 +885,11 @@ function createAIBar() {
                         <small id="slb-ai-status">확장 탭에서 번역 방식을 설정해주세요.</small>
                     </span>
                 </label>
+                <label class="slb-field slb-options-location-field"><small>자동 번역 옵션 표시 위치</small><select id="slb-options-location" class="text_pole">
+                    <option value="lorebook">로어북 상단</option>
+                    <option value="extension">확장 탭</option>
+                </select></label>
+                <div id="slb-quick-options-host"></div>
             </div>
         </div>`;
 
@@ -889,6 +901,7 @@ function createAIBar() {
     const profile = document.getElementById('slb-profile');
     const language = document.getElementById('slb-language');
     const outputTokens = document.getElementById('slb-output-tokens');
+    const optionsLocation = document.getElementById('slb-options-location');
 
     function syncProviderUI() {
         const usingGoogle = getSettings().translationProvider === 'google';
@@ -899,6 +912,7 @@ function createAIBar() {
     provider.value = settings.translationProvider;
     language.value = settings.language;
     outputTokens.value = String(settings.aiOutputTokens);
+    optionsLocation.value = settings.quickOptionsLocation;
     translatePrompt.value = settings.translationPrompt || '';
     translatePrompt.addEventListener('input', () => {
         settings.translationPrompt = translatePrompt.value;
@@ -931,6 +945,14 @@ function createAIBar() {
         saveSettingsDebounced();
         notify(`AI 출력 토큰을 ${value.toLocaleString()}으로 저장했습니다.`);
     });
+    optionsLocation.addEventListener('change', () => {
+        settings.quickOptionsLocation = optionsLocation.value === 'extension' ? 'extension' : 'lorebook';
+        saveSettingsDebounced();
+        syncQuickTranslationOptionsPlacement();
+        notify(settings.quickOptionsLocation === 'extension'
+            ? '자동 번역 옵션을 확장 탭에 표시합니다.'
+            : '자동 번역 옵션을 로어북 상단에 표시합니다.');
+    });
     document.getElementById('slb-test-profile').addEventListener('click', async event => {
         const button = event.currentTarget;
         button.disabled = true;
@@ -950,9 +972,10 @@ function createAIBar() {
             button.disabled = false;
         }
     });
+    syncQuickTranslationOptionsPlacement();
 }
 
-function createQuickTranslationOptions(popup, entries) {
+function createQuickTranslationOptions() {
     let options = document.getElementById('slb-quick-options');
     if (!options) {
         options = createElement('div', 'slb-quick-options');
@@ -961,9 +984,7 @@ function createQuickTranslationOptions(popup, entries) {
             <label><input type="checkbox" id="slb-translate-missing"> 번역본 없는 항목을 열 때 자동 번역</label>
             <label><input type="checkbox" id="slb-auto-translate"> 원문 변경 시 자동 번역</label>
             <label><input type="checkbox" id="slb-auto-sync"> 번역 변경 시 원문 자동 반영</label>`;
-        popup.insertBefore(options, entries);
     }
-    popup.insertBefore(options, document.getElementById('slb-token-strip') || entries);
 
     if (options.dataset.slbBound === VERSION) return options;
     const settings = getSettings();
@@ -991,12 +1012,68 @@ function createQuickTranslationOptions(popup, entries) {
     return options;
 }
 
+function syncQuickTranslationOptionsPlacement() {
+    const settings = getSettings();
+    const select = document.getElementById('slb-options-location');
+    if (select) select.value = settings.quickOptionsLocation;
+
+    let options = document.getElementById('slb-quick-options');
+    if (settings.quickOptionsLocation === 'extension') {
+        const host = document.getElementById('slb-quick-options-host');
+        if (!host) return;
+        options = options || createQuickTranslationOptions();
+        host.append(options);
+        return;
+    }
+
+    const popup = document.getElementById('world_popup');
+    const entries = document.getElementById('world_popup_entries_list');
+    if (!popup || !entries) {
+        options?.remove();
+        return;
+    }
+
+    options = options || createQuickTranslationOptions();
+    popup.insertBefore(options, document.getElementById('slb-token-summary-section') || entries);
+}
+
+function setSummarySectionCollapsed(section, collapsed) {
+    const body = section.querySelector('.slb-summary-body');
+    const toggle = section.querySelector('.slb-summary-toggle');
+    section.classList.toggle('is-collapsed', collapsed);
+    if (body) body.hidden = collapsed;
+    if (toggle) toggle.setAttribute('aria-expanded', String(!collapsed));
+}
+
+function createSummarySection(id, title, iconClass, body, settingKey) {
+    const section = createElement('section', 'slb-summary-section');
+    section.id = id;
+    const toggle = createElement('button', 'slb-summary-toggle');
+    toggle.type = 'button';
+    toggle.innerHTML = `
+        <span><i class="${iconClass}" aria-hidden="true"></i> ${title}</span>
+        <i class="fa-solid fa-chevron-up slb-summary-chevron" aria-hidden="true"></i>`;
+    body.classList.add('slb-summary-body');
+    section.append(toggle, body);
+
+    const settings = getSettings();
+    setSummarySectionCollapsed(section, Boolean(settings[settingKey]));
+    toggle.addEventListener('click', () => {
+        settings[settingKey] = !section.classList.contains('is-collapsed');
+        setSummarySectionCollapsed(section, settings[settingKey]);
+        saveSettingsDebounced();
+    });
+    return section;
+}
+
 function createWorkspace() {
     const popup = document.getElementById('world_popup');
     const entries = document.getElementById('world_popup_entries_list');
     if (!popup || !entries) return;
-    createQuickTranslationOptions(popup, entries);
-    if (document.getElementById('slb-token-strip')) return;
+    if (document.getElementById('slb-token-strip')) {
+        syncQuickTranslationOptionsPlacement();
+        return;
+    }
 
     const tokens = createElement('div', 'slb-token-strip');
     tokens.id = 'slb-token-strip';
@@ -1010,14 +1087,16 @@ function createWorkspace() {
     const filters = createElement('div', 'slb-entry-filters');
     filters.id = 'slb-entry-filters';
     filters.innerHTML = `
-        <small>항목 필터</small>
         <button type="button" class="menu_button slb-filter-button" data-filter="all">전체</button>
         <button type="button" class="menu_button slb-filter-button" data-filter="constant">상시 주입 🔵</button>
         <button type="button" class="menu_button slb-filter-button" data-filter="normal">선택 주입 🟢</button>
         <button type="button" class="menu_button slb-filter-button" data-filter="vectorized">벡터화 🔗</button>`;
 
-    popup.insertBefore(tokens, entries);
-    popup.insertBefore(filters, entries);
+    const tokenSection = createSummarySection('slb-token-summary-section', '토큰 통계', 'fa-solid fa-calculator', tokens, 'tokenSummaryCollapsed');
+    const filterSection = createSummarySection('slb-entry-filters-section', '항목 필터', 'fa-solid fa-filter', filters, 'entryFiltersCollapsed');
+    popup.insertBefore(tokenSection, entries);
+    popup.insertBefore(filterSection, entries);
+    syncQuickTranslationOptionsPlacement();
     syncFilterButtons();
 
     filters.addEventListener('click', event => {
