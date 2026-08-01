@@ -11,13 +11,16 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.9';
+const VERSION = '1.3.10';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
 const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)';
 const FULL_HEADER_FIELDS_MIN_WIDTH = 580;
 const HEADER_LAYOUT_SAFETY_GAP = 24;
+const GOOGLE_TRANSLATE_CHUNK_LIMIT = 2200;
+const GOOGLE_TRANSLATE_CHUNK_DELAY = 350;
+const GOOGLE_TRANSLATE_RETRY_DELAYS = Object.freeze([650, 1600]);
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
     language: 'Korean',
@@ -65,6 +68,7 @@ const state = {
     responsiveMedia: null,
     responsiveObserver: null,
     responsiveRaf: 0,
+    googleTranslationQueue: Promise.resolve(),
 };
 
 function getSettings() {
@@ -220,26 +224,179 @@ function unmaskMacros(text, macros) {
     return String(text ?? '').replace(/\u27e6(\d+)\u27e7/g, (match, index) => macros[Number(index)] ?? match);
 }
 
-async function googleTranslate(text) {
-    const settings = getSettings();
-    const lang = GOOGLE_LANGUAGE_CODES[settings.language] || 'ko';
-    const { masked, macros } = maskMacros(text);
-    const response = await fetch('/api/translate/google', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({ text: masked, lang }),
-    });
-    if (!response.ok) {
-        throw new Error('구글 번역 요청에 실패했습니다.');
+function waitForGoogleTranslation(milliseconds) {
+    return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+function lastGoogleSplitBoundary(sample, minimum, limit, pattern, toBoundary) {
+    let best = null;
+    let match;
+    while ((match = pattern.exec(sample)) !== null) {
+        const boundary = toBoundary(match);
+        if (boundary.textEnd >= minimum && boundary.textEnd <= limit) best = boundary;
+        if (!match[0].length) pattern.lastIndex += 1;
     }
-    const translated = await response.text();
+    return best;
+}
+
+function findGoogleSplitBoundary(text, limit) {
+    const minimum = Math.floor(limit * 0.45);
+    const sample = text.slice(0, limit + 64);
+    const paragraph = lastGoogleSplitBoundary(
+        sample,
+        minimum,
+        limit,
+        /(?:\r\n|\r|\n)[\t ]*(?:(?:\r\n|\r|\n)[\t ]*)+/g,
+        match => ({ textEnd: match.index, separatorEnd: match.index + match[0].length }),
+    );
+    if (paragraph) return paragraph;
+
+    const line = lastGoogleSplitBoundary(
+        sample,
+        minimum,
+        limit,
+        /(?:\r\n|\r|\n)/g,
+        match => ({ textEnd: match.index, separatorEnd: match.index + match[0].length }),
+    );
+    if (line) return line;
+
+    const sentence = lastGoogleSplitBoundary(
+        sample,
+        minimum,
+        limit,
+        /([.!?。！？]+(?:["'’”)\]}»]+)?)([\t ]+)/g,
+        match => ({
+            textEnd: match.index + match[1].length,
+            separatorEnd: match.index + match[0].length,
+        }),
+    );
+    if (sentence) return sentence;
+
+    return lastGoogleSplitBoundary(
+        sample,
+        minimum,
+        limit,
+        /[\t ]+/g,
+        match => ({ textEnd: match.index, separatorEnd: match.index + match[0].length }),
+    );
+}
+
+function safeHardSplitIndex(text, limit) {
+    let index = Math.min(limit, text.length);
+    const openToken = text.lastIndexOf('\u27e6', index - 1);
+    const closeToken = text.lastIndexOf('\u27e7', index - 1);
+    if (openToken > closeToken && openToken > 0) index = openToken;
+
+    const previous = text.charCodeAt(index - 1);
+    const next = text.charCodeAt(index);
+    if (previous >= 0xD800 && previous <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) index -= 1;
+    return Math.max(1, index);
+}
+
+function splitGoogleTranslationChunks(text, limit = GOOGLE_TRANSLATE_CHUNK_LIMIT) {
+    const chunks = [];
+    let remaining = String(text ?? '');
+    while (remaining.length > limit) {
+        const boundary = findGoogleSplitBoundary(remaining, limit);
+        const textEnd = boundary?.textEnd ?? safeHardSplitIndex(remaining, limit);
+        const separatorEnd = boundary?.separatorEnd ?? textEnd;
+        chunks.push({
+            text: remaining.slice(0, textEnd),
+            separator: remaining.slice(textEnd, separatorEnd),
+        });
+        remaining = remaining.slice(separatorEnd);
+    }
+    if (remaining || !chunks.length) chunks.push({ text: remaining, separator: '' });
+    return chunks;
+}
+
+function maskLineBreaks(text) {
+    const lineBreaks = [];
+    const masked = String(text ?? '').replace(/(?:\r\n|\r|\n)+/g, match => {
+        const token = `\u27e6${900000000 + lineBreaks.length}\u27e7`;
+        lineBreaks.push({ token, value: match });
+        return token;
+    });
+    return { masked, lineBreaks };
+}
+
+function unmaskLineBreaks(text, lineBreaks) {
+    let restored = String(text ?? '');
+    for (const { token, value } of lineBreaks) restored = restored.split(token).join(value);
+    return restored;
+}
+
+async function requestGoogleTranslationChunk(text, lang) {
+    if (!text.trim()) return text;
+    const { masked, lineBreaks } = maskLineBreaks(text);
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= GOOGLE_TRANSLATE_RETRY_DELAYS.length; attempt += 1) {
+        if (attempt > 0) await waitForGoogleTranslation(GOOGLE_TRANSLATE_RETRY_DELAYS[attempt - 1]);
+        try {
+            const response = await fetch('/api/translate/google', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ text: masked, lang }),
+            });
+            if (!response.ok) throw new Error(`구글 번역 서버 응답 오류 (${response.status})`);
+            const translated = await response.text();
+            if (!translated.trim()) throw new Error('구글 번역 응답이 비어 있습니다.');
+            return unmaskLineBreaks(translated, lineBreaks);
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    throw lastError || new Error('구글 번역 요청에 실패했습니다.');
+}
+
+async function translateGoogleChunkWithFallback(text, lang, depth = 0) {
+    try {
+        return await requestGoogleTranslationChunk(text, lang);
+    } catch (error) {
+        if (depth >= 2 || text.length < 500) throw error;
+        const fallbackLimit = Math.max(450, Math.floor(text.length / 2));
+        const parts = splitGoogleTranslationChunks(text, fallbackLimit);
+        if (parts.length < 2) throw error;
+
+        let translated = '';
+        for (let index = 0; index < parts.length; index += 1) {
+            translated += await translateGoogleChunkWithFallback(parts[index].text, lang, depth + 1);
+            translated += parts[index].separator;
+            if (index < parts.length - 1) await waitForGoogleTranslation(GOOGLE_TRANSLATE_CHUNK_DELAY);
+        }
+        return translated;
+    }
+}
+
+async function runQueuedGoogleTranslation(text, lang, onProgress) {
+    const { masked, macros } = maskMacros(text);
+    const chunks = splitGoogleTranslationChunks(masked);
+    let translated = '';
+
+    for (let index = 0; index < chunks.length; index += 1) {
+        if (typeof onProgress === 'function') onProgress(index + 1, chunks.length);
+        translated += await translateGoogleChunkWithFallback(chunks[index].text, lang);
+        translated += chunks[index].separator;
+        if (index < chunks.length - 1) await waitForGoogleTranslation(GOOGLE_TRANSLATE_CHUNK_DELAY);
+    }
     return unmaskMacros(translated, macros);
 }
 
-async function translateText(source) {
+function googleTranslate(text, onProgress = null) {
+    const lang = GOOGLE_LANGUAGE_CODES[getSettings().language] || 'ko';
+    const job = state.googleTranslationQueue
+        .catch(() => undefined)
+        .then(() => runQueuedGoogleTranslation(String(text ?? ''), lang, onProgress));
+    state.googleTranslationQueue = job.catch(() => undefined);
+    return job;
+}
+
+async function translateText(source, onProgress = null) {
     const settings = getSettings();
     if (settings.translationProvider === 'google') {
-        return googleTranslate(source);
+        return googleTranslate(source, onProgress);
     }
     const language = settings.language;
     const customPrompt = settings.translationPrompt?.trim();
@@ -1222,7 +1379,9 @@ async function translateEntrySource(ui, force = false, background = false) {
         setEntryBusy(ui, true, '원문을 번역하는 중…');
     }
     try {
-        const translated = await translateText(source);
+        const translated = await translateText(source, (current, total) => {
+            if (total > 1) ui.status.textContent = `긴 원문 분할 번역 중… ${current}/${total}`;
+        });
         if (ui.source.value !== source) {
             ui.status.textContent = '번역 중 원문이 다시 변경되어 이전 결과를 적용하지 않았습니다.';
             return;
