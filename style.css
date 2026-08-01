@@ -1967,23 +1967,23 @@
 
     #WorldInfo.slb-active .slb-filter-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-        grid-template-rows: 98px;
-        position: relative;
-        column-gap: 58px !important;
+        grid-template-rows: auto;
+        position: static;
+        column-gap: 12px !important;
         row-gap: 0 !important;
         align-items: start !important;
     }
 
     #WorldInfo.slb-active .slb-filter-grid > .slb-filter-column {
         display: grid !important;
-        grid-template-rows: 18px 78px;
-        gap: 2px;
+        grid-template-rows: auto auto;
+        gap: 4px;
         align-content: start !important;
         align-items: start !important;
-        overflow: visible !important;
-        height: 98px !important;
-        min-height: 98px !important;
-        max-height: 98px !important;
+        overflow: hidden !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
     }
 
     #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header {
@@ -2016,11 +2016,11 @@
 
     #WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude {
         display: inline-flex !important;
-        position: absolute !important;
-        z-index: 2;
-        top: 1px;
-        left: 50%;
-        transform: translateX(-50%);
+        position: static !important;
+        z-index: auto;
+        top: auto;
+        left: auto;
+        transform: none;
         box-sizing: border-box;
         width: max-content !important;
         min-width: 0 !important;
@@ -2119,20 +2119,18 @@
 }
 
 /* ============================================================
-   v1.3.19 — 호출 조건 상단 줄 & 연결 필터 정렬 (모든 화면 폭 공통)
+   v1.3.20 — 통합 정렬 (모든 화면 폭 공통, 파일 마지막 = 최우선)
    ============================================================ */
 
-/* 호출 조건: Strategy·위치·깊이·순서·발동확률을 한 줄에 꽉 차게 */
+/* ── 호출 조건: Strategy·위치·깊이·순서·발동확률 한 줄 꽉 채움 ── */
 #WorldInfo.slb-active .world_entry .slb-activation-overview,
 #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview {
     display: grid !important;
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.9fr) minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1fr) !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 1.1fr) !important;
     grid-template-rows: none !important;
-    gap: 0 14px !important;
+    gap: 0 10px !important;
     width: 100% !important;
     align-items: end !important;
-    /* 위 여백은 탭바 밑선의 margin(10px)이 만들므로, 아래도 10px로 맞춰
-       AI 키워드 추천 박스와 탭 밑선 사이 정중앙에 오게 한다 */
     margin: 0 0 10px !important;
     padding: 0 !important;
     border: 0 !important;
@@ -2146,6 +2144,7 @@
 
 #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field {
     grid-area: auto !important;
+    display: block !important;
     width: 100% !important;
     min-width: 0 !important;
     max-width: none !important;
@@ -2154,58 +2153,146 @@
     align-self: end !important;
 }
 
-#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field > select,
-#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field > input,
-#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field > textarea {
+/* 칸 제목 크기 통일 */
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-label,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field small {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 0 3px !important;
+    padding: 0 !important;
+    font-size: 0.8em !important;
+    line-height: 1.25 !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+/* 칸 컨트롤이 칸 폭을 가득 채우고 높이 통일 → 발동확률% 오른쪽 끝이
+   아래 줄(선택적 필터/자동화 ID)의 오른쪽 끝과 일치 */
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field select,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field input,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field textarea {
     box-sizing: border-box;
+    display: block;
     width: 100% !important;
     min-width: 0 !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
     margin: 0 !important;
 }
 
-/* 연결 필터: 두 열 폭·높이 동일, 헤더 한 줄 고정 */
+#WorldInfo.slb-active .world_entry .slb-activation-overview .range-block-range {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+}
+
+/* ── Recursion Level · Outlet Name: 오른쪽 끝까지 ── */
+#WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="delayUntilRecursionLevel"] {
+    grid-column: 1 / 3 !important;
+    width: 100% !important;
+    max-width: none !important;
+    justify-self: stretch !important;
+}
+
+#WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="outletName"] {
+    grid-column: 3 / -1 !important;
+    width: 100% !important;
+    max-width: none !important;
+    justify-self: stretch !important;
+}
+
+#WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="delayUntilRecursionLevel"] input,
+#WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="outletName"] input {
+    box-sizing: border-box;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+}
+
+/* ── 연결 필터: 두 창 동일 크기·박스 이탈 금지 ── */
 #WorldInfo.slb-active .slb-filter-grid {
     display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     grid-template-rows: none !important;
-    gap: 12px !important;
+    gap: 6px 12px !important;
     width: 100% !important;
-    align-items: stretch !important;
+    position: static !important;
+    align-items: start !important;
+    overflow: hidden !important;
 }
 
 #WorldInfo.slb-active .slb-filter-grid > .slb-filter-column {
     display: grid !important;
-    grid-template-rows: auto minmax(0, 1fr) !important;
+    grid-template-rows: auto 160px !important;
     row-gap: 4px !important;
     width: 100% !important;
     min-width: 0 !important;
     height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
     margin: 0 !important;
+    overflow: hidden !important;
 }
 
-/* 헤더: 제목과 Exclude가 같은 줄 맨 위에 나란히 (줄바꿈 금지) */
-#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header {
+/* 헤더: 제목·Exclude 같은 줄, 제목 크기는 다른 칸 제목과 동일(0.8em) */
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header,
+#WorldInfo.slb-active .slb-filter-grid > .slb-filter-column > .flex-container:first-child {
     display: flex !important;
     flex-flow: row nowrap !important;
     justify-content: space-between !important;
     align-items: center !important;
     gap: 6px !important;
+    width: 100% !important;
     height: auto !important;
     min-height: 0 !important;
+    max-height: none !important;
     margin: 0 !important;
     padding: 0 !important;
+    position: static !important;
 }
 
-#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > small:first-child {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header .checkbox_label,
-#WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude {
-    flex: 0 0 auto !important;
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > small,
+#WorldInfo.slb-active .slb-filter-grid > .slb-filter-column > .flex-container:first-child > small {
+    flex: 1 1 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
     margin: 0 !important;
+    font-size: 0.8em !important;
+    line-height: 1.25 !important;
+    text-align: left !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+/* Exclude: 제목과 같은 줄 오른쪽에 고정 (부양 금지) */
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude,
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header .checkbox_label,
+#WorldInfo.slb-active .slb-filter-grid > .slb-filter-column > .flex-container:first-child .checkbox_label {
+    display: inline-flex !important;
+    position: static !important;
+    top: auto !important;
+    left: auto !important;
+    transform: none !important;
+    z-index: auto !important;
+    flex: 0 0 auto !important;
+    width: max-content !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-items: center !important;
     align-self: center !important;
+    gap: 4px !important;
+    background: transparent !important;
+    font-size: 0.8em !important;
+    line-height: 1.25 !important;
     white-space: nowrap !important;
 }
 
@@ -2216,46 +2303,32 @@
     height: 100% !important;
     min-height: 0 !important;
     margin: 0 !important;
+    overflow: hidden !important;
 }
 
-/* 두 선택창을 열 폭에 꼭 맞게 + 같은 최대 높이로 고정 */
+/* 선택창: 어떤 이름/구조든 열 폭 100% + 높이 160px 고정 → 절대 박스 이탈 불가 */
+#WorldInfo.slb-active .slb-filter-grid select[multiple],
 #WorldInfo.slb-active .slb-filter-grid select[name="characterFilter"],
-#WorldInfo.slb-active .slb-filter-grid select[name="triggers"] {
+#WorldInfo.slb-active .slb-filter-grid select[name="character_filter"],
+#WorldInfo.slb-active .slb-filter-grid select[name="triggers"],
+#WorldInfo.slb-active .slb-filter-grid select[name="generationTriggers"],
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-control select,
+#WorldInfo.slb-active .slb-filter-grid .range-block-range select {
     box-sizing: border-box;
     display: block !important;
     width: 100% !important;
     min-width: 0 !important;
-    height: 150px !important;
-    min-height: 150px !important;
-    max-height: 150px !important;
+    max-width: 100% !important;
+    height: 160px !important;
+    min-height: 160px !important;
+    max-height: 160px !important;
     margin: 0 !important;
+    overflow-y: auto !important;
 }
 
 #WorldInfo.slb-active .slb-filter-grid .select2-container {
     width: 100% !important;
     min-width: 0 !important;
+    max-width: 100% !important;
     margin: 0 !important;
-}
-
-/* 헤더 클래스 감지 실패 시를 위한 네이티브 구조 폴백 */
-#WorldInfo.slb-active .slb-filter-grid > .slb-filter-column > .flex-container:first-child {
-    display: flex !important;
-    flex-flow: row nowrap !important;
-    justify-content: space-between !important;
-    align-items: center !important;
-    gap: 6px !important;
-    height: auto !important;
-    min-height: 0 !important;
-    margin: 0 !important;
-}
-
-#WorldInfo.slb-active .slb-filter-grid > .slb-filter-column > .flex-container:first-child > small {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-#WorldInfo.slb-active .slb-filter-grid > .slb-filter-column > .flex-container:first-child .checkbox_label {
-    flex: 0 0 auto !important;
-    margin: 0 !important;
-    white-space: nowrap !important;
 }
