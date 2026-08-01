@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.6';
+const VERSION = '1.3.7';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -493,11 +493,6 @@ function createAIBar() {
                         <small id="slb-ai-status">확장 탭에서 번역 방식을 설정해주세요.</small>
                     </span>
                 </label>
-                <div class="slb-ai-options">
-                    <label><input type="checkbox" id="slb-translate-missing"> 번역본 없는 항목을 열 때 자동 번역</label>
-                    <label><input type="checkbox" id="slb-auto-translate"> 원문 변경 시 자동 번역</label>
-                    <label><input type="checkbox" id="slb-auto-sync"> 번역 변경 시 원문 자동 반영</label>
-                </div>
             </div>
         </div>`;
 
@@ -508,9 +503,6 @@ function createAIBar() {
     const provider = document.getElementById('slb-provider');
     const profile = document.getElementById('slb-profile');
     const language = document.getElementById('slb-language');
-    const translateMissing = document.getElementById('slb-translate-missing');
-    const autoTranslate = document.getElementById('slb-auto-translate');
-    const autoSync = document.getElementById('slb-auto-sync');
 
     function syncProviderUI() {
         const usingGoogle = getSettings().translationProvider === 'google';
@@ -525,9 +517,6 @@ function createAIBar() {
         settings.translationPrompt = translatePrompt.value;
         saveSettingsDebounced();
     });
-    translateMissing.checked = settings.translateMissingOnOpen;
-    autoTranslate.checked = settings.autoTranslateSource;
-    autoSync.checked = settings.autoSyncToSource;
     syncProviderUI();
 
     provider.addEventListener('change', () => {
@@ -547,19 +536,6 @@ function createAIBar() {
         settings.language = language.value;
         saveSettingsDebounced();
         scheduleEnhance();
-    });
-    translateMissing.addEventListener('change', () => {
-        settings.translateMissingOnOpen = translateMissing.checked;
-        saveSettingsDebounced();
-    });
-    autoTranslate.addEventListener('change', () => {
-        settings.autoTranslateSource = autoTranslate.checked;
-        saveSettingsDebounced();
-    });
-    autoSync.addEventListener('change', () => {
-        settings.autoSyncToSource = autoSync.checked;
-        saveSettingsDebounced();
-        syncAutoControls();
     });
     document.getElementById('slb-test-profile').addEventListener('click', async event => {
         const button = event.currentTarget;
@@ -582,11 +558,51 @@ function createAIBar() {
     });
 }
 
+function createQuickTranslationOptions(popup, entries) {
+    let options = document.getElementById('slb-quick-options');
+    if (!options) {
+        options = createElement('div', 'slb-quick-options');
+        options.id = 'slb-quick-options';
+        options.innerHTML = `
+            <label><input type="checkbox" id="slb-translate-missing"> 번역본 없는 항목을 열 때 자동 번역</label>
+            <label><input type="checkbox" id="slb-auto-translate"> 원문 변경 시 자동 번역</label>
+            <label><input type="checkbox" id="slb-auto-sync"> 번역 변경 시 원문 자동 반영</label>`;
+        popup.insertBefore(options, entries);
+    }
+    popup.insertBefore(options, document.getElementById('slb-token-strip') || entries);
+
+    if (options.dataset.slbBound === VERSION) return options;
+    const settings = getSettings();
+    const translateMissing = options.querySelector('#slb-translate-missing');
+    const autoTranslate = options.querySelector('#slb-auto-translate');
+    const autoSync = options.querySelector('#slb-auto-sync');
+    translateMissing.checked = settings.translateMissingOnOpen;
+    autoTranslate.checked = settings.autoTranslateSource;
+    autoSync.checked = settings.autoSyncToSource;
+
+    translateMissing.addEventListener('change', () => {
+        settings.translateMissingOnOpen = translateMissing.checked;
+        saveSettingsDebounced();
+    });
+    autoTranslate.addEventListener('change', () => {
+        settings.autoTranslateSource = autoTranslate.checked;
+        saveSettingsDebounced();
+    });
+    autoSync.addEventListener('change', () => {
+        settings.autoSyncToSource = autoSync.checked;
+        saveSettingsDebounced();
+        syncAutoControls();
+    });
+    options.dataset.slbBound = VERSION;
+    return options;
+}
+
 function createWorkspace() {
-    if (document.getElementById('slb-token-strip')) return;
     const popup = document.getElementById('world_popup');
     const entries = document.getElementById('world_popup_entries_list');
     if (!popup || !entries) return;
+    createQuickTranslationOptions(popup, entries);
+    if (document.getElementById('slb-token-strip')) return;
 
     const tokens = createElement('div', 'slb-token-strip');
     tokens.id = 'slb-token-strip';
@@ -1388,8 +1404,8 @@ function enhanceEntry(entry) {
         Array.from(filterRow.children).forEach(column => column.classList.add('slb-filter-column'));
         panels.filter.append(filterRow);
     }
-    if (bottomControls) panels.filter.append(bottomControls);
     if (matchingSources) panels.filter.append(matchingSources);
+    if (bottomControls) panels.filter.append(bottomControls);
 
     const assigned = new Set([activationContainer, groupRow, filterRow, bottomControls, matchingSources].filter(Boolean));
     for (const child of originalChildren) {

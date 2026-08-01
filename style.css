@@ -24,7 +24,7 @@
 
 #slb-ai-tools .slb-ai-title,
 #slb-ai-tools .slb-ai-fields,
-#slb-ai-tools .slb-ai-options,
+#WorldInfo.slb-active .slb-quick-options,
 #WorldInfo.slb-active .slb-token-strip,
 #WorldInfo.slb-active .slb-entry-editor-head,
 #WorldInfo.slb-active .slb-sync-row,
@@ -90,7 +90,7 @@
     opacity: 0.75;
 }
 
-#slb-ai-tools .slb-ai-options label,
+#WorldInfo.slb-active .slb-quick-options label,
 #WorldInfo.slb-active .slb-sync-row label {
     display: inline-flex;
     align-items: center;
@@ -121,6 +121,20 @@
     margin: 8px 0;
     padding: 8px 10px;
     border-block: 1px solid var(--slb-border);
+}
+
+#WorldInfo.slb-active .slb-quick-options {
+    box-sizing: border-box;
+    justify-content: flex-start;
+    gap: 6px 18px;
+    width: 100%;
+    margin: 6px 0 3px;
+    padding: 4px;
+}
+
+#WorldInfo.slb-active .slb-quick-options label {
+    white-space: nowrap;
+    word-break: keep-all;
 }
 
 #WorldInfo.slb-active .slb-token-strip strong {
@@ -451,6 +465,14 @@
     display: block;
 }
 
+#WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-filter-grid {
+    margin-bottom: 6px !important;
+}
+
+#WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-filter-grid + .inline-drawer {
+    margin-top: 0 !important;
+}
+
 #WorldInfo.slb-active .slb-group-grid {
     display: grid !important;
     grid-template-columns: minmax(190px, 2fr) repeat(4, minmax(72px, 1fr));
@@ -675,6 +697,23 @@
 }
 
 @media (max-width: 760px) {
+    #WorldInfo.slb-active .slb-quick-options {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 5px 10px;
+        padding-inline: 2px;
+    }
+
+    #WorldInfo.slb-active .slb-quick-options label {
+        min-width: 0;
+        white-space: normal;
+        line-height: 1.25;
+    }
+
+    #WorldInfo.slb-active .slb-quick-options label:last-child {
+        grid-column: 1 / -1;
+    }
+
     #WorldInfo.slb-active .slb-workspace {
         grid-template-columns: minmax(0, 1fr);
     }
@@ -1111,10 +1150,6 @@
     margin: 2px 0 0 !important;
     padding: 0 !important;
     line-height: 1.3;
-}
-
-#slb-ai-tools .slb-ai-options {
-    margin: 0 !important;
 }
 
 @media (min-width: 761px) {
