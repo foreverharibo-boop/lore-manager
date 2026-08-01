@@ -2627,3 +2627,101 @@
     overflow-y: auto !important;
     overflow-x: hidden !important;
 }
+
+/* ============================================================
+   v1.3.22 — 모바일 연결 필터만 재배치
+   데스크톱 규칙은 건드리지 않는다.
+   ============================================================ */
+@media (max-width: 760px) {
+    #WorldInfo.slb-active .slb-filter-grid {
+        display: grid !important;
+        position: relative !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        grid-template-rows: 24px var(--slb-filter-box-height) !important;
+        column-gap: 12px !important;
+        row-gap: 5px !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        overflow: visible !important;
+    }
+
+    /* 이전 모바일 규칙의 .56em 상속을 끊어 다른 탭 제목과 같은 크기로 맞춘다. */
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header {
+        display: contents !important;
+        font-size: 1em !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-1 > .slb-filter-column-header > small,
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-1 > .slb-filter-column-header > .world_entry_form_label,
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-1 > .slb-filter-column-header > [data-role="filter-label"],
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-1 > .slb-filter-column-header > label:not(.slb-filter-exclude):not(.slb-filter-placeholder) {
+        grid-column: 1 !important;
+        grid-row: 1 !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-2 > .slb-filter-column-header > small,
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-2 > .slb-filter-column-header > .world_entry_form_label,
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-2 > .slb-filter-column-header > [data-role="filter-label"],
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-2 > .slb-filter-column-header > label:not(.slb-filter-exclude):not(.slb-filter-placeholder) {
+        grid-column: 2 !important;
+        grid-row: 1 !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > small,
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > .world_entry_form_label,
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > [data-role="filter-label"],
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > label:not(.slb-filter-exclude):not(.slb-filter-placeholder) {
+        display: flex !important;
+        box-sizing: border-box !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        height: 24px !important;
+        min-height: 24px !important;
+        max-height: 24px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        align-items: center !important;
+        justify-content: center !important;
+        font-size: 0.76em !important;
+        line-height: 1 !important;
+        letter-spacing: -0.02em !important;
+        text-align: center !important;
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude {
+        display: inline-flex !important;
+        position: absolute !important;
+        z-index: 3 !important;
+        top: 0 !important;
+        left: 50% !important;
+        grid-column: auto !important;
+        grid-row: auto !important;
+        width: max-content !important;
+        height: 24px !important;
+        min-height: 24px !important;
+        max-height: 24px !important;
+        margin: 0 !important;
+        padding: 0 4px !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 3px !important;
+        background: var(--SmartThemeBlurTintColor, var(--slb-surface)) !important;
+        font-size: 0.68em !important;
+        line-height: 1 !important;
+        white-space: nowrap !important;
+        transform: translateX(-50%) !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-1 > .slb-filter-control {
+        grid-column: 1 !important;
+        grid-row: 2 !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-2 > .slb-filter-control {
+        grid-column: 2 !important;
+        grid-row: 2 !important;
+    }
+}
