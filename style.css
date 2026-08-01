@@ -192,6 +192,9 @@
 }
 
 #WorldInfo.slb-active .slb-tabbar {
+    box-sizing: border-box;
+    flex: 1 1 100%;
+    width: 100%;
     margin: 4px 0 10px;
     padding-bottom: 4px;
     border-bottom: 1px solid var(--slb-border);
@@ -213,6 +216,10 @@
 
 #WorldInfo.slb-active .slb-panel {
     display: none;
+    box-sizing: border-box;
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
 }
 
 #WorldInfo.slb-active .slb-panel.is-active {
@@ -221,6 +228,10 @@
 
 #WorldInfo.slb-active [name="contentAndCharFilterBlock"].slb-content-grid {
     display: grid !important;
+    box-sizing: border-box;
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    max-width: none !important;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     align-items: stretch;
@@ -295,16 +306,6 @@
 
 #WorldInfo.slb-active .slb-entry-meta > * {
     max-width: 100%;
-}
-
-#WorldInfo.slb-active .slb-insertion-note {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px;
-    border: 1px solid var(--slb-border);
-    border-radius: 8px;
-    background: var(--slb-surface);
 }
 
 #WorldInfo.slb-active .slb-busy {

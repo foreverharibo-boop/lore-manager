@@ -679,14 +679,13 @@ function enhanceEntry(entry) {
     const tabs = [
         createTab('content', '원문 · 번역'),
         createTab('activation', '호출 조건'),
-        createTab('insertion', '삽입 · 순서'),
         createTab('group', '그룹 · 반복'),
         createTab('filter', '연결 필터'),
     ];
     tabbar.append(...tabs);
 
     const panels = {};
-    for (const name of ['content', 'activation', 'insertion', 'group', 'filter']) {
+    for (const name of ['content', 'activation', 'group', 'filter']) {
         panels[name] = createElement('section', 'slb-panel');
         panels[name].dataset.panel = name;
     }
@@ -695,9 +694,6 @@ function enhanceEntry(entry) {
     if (commentContainer) panels.content.append(commentContainer);
     if (activationContainer && activationContainer.isConnected) panels.activation.append(activationContainer);
 
-    const insertionNote = createElement('div', 'slb-insertion-note');
-    insertionNote.innerHTML = '<i class="fa-solid fa-arrow-up" aria-hidden="true"></i><span>삽입 위치·깊이·순서·호출 확률은 항목 제목 바로 위의 기본 헤더에서 조정합니다.</span>';
-    panels.insertion.append(insertionNote);
     if (groupRow) panels.group.append(groupRow);
     if (filterRow) panels.filter.append(filterRow);
     if (bottomControls) panels.filter.append(bottomControls);
@@ -708,7 +704,7 @@ function enhanceEntry(entry) {
         if (!assigned.has(child) && child.isConnected) panels.filter.append(child);
     }
 
-    edit.replaceChildren(tabbar, panels.content, panels.activation, panels.insertion, panels.group, panels.filter);
+    edit.replaceChildren(tabbar, panels.content, panels.activation, panels.group, panels.filter);
 
     function showTab(name) {
         tabs.forEach(tab => tab.classList.toggle('is-active', tab.dataset.tab === name));
