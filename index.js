@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.23';
+const VERSION = '1.3.24';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -85,6 +85,39 @@ const state = {
     responsiveRaf: 0,
     googleTranslationQueue: Promise.resolve(),
 };
+
+function ensureCriticalLayoutStyles() {
+    const styleId = 'slb-critical-layout-1-3-24';
+    if (document.getElementById(styleId)) return;
+    document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
+
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.dataset.slbCriticalLayout = VERSION;
+    style.textContent = `
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{--slb-slot-h:160px;display:grid!important;box-sizing:border-box!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-template-areas:"title-left title-right" "control-left control-right"!important;grid-template-rows:24px var(--slb-slot-h)!important;column-gap:24px!important;row-gap:5px!important;position:relative!important;width:100%!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot-1{grid-area:title-left!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot-2{grid-area:title-right!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot-1{grid-area:control-left!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot-2{grid-area:control-right!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot{display:flex!important;box-sizing:border-box!important;width:100%!important;min-width:0!important;height:24px!important;align-items:center!important;justify-content:center!important;padding:0 3px!important;overflow:visible!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] .slb-filter-title{display:block!important;position:static!important;width:100%!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;font-size:.8em!important;line-height:1.05!important;text-align:center!important;white-space:nowrap!important;overflow:visible!important;text-overflow:clip!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot{display:block!important;box-sizing:border-box!important;width:100%!important;min-width:0!important;height:var(--slb-slot-h)!important;margin:0!important;padding:0!important;overflow:hidden!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot>.slb-filter-control,#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot select,#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot .select2-container,#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot .select2-selection--multiple{display:block!important;box-sizing:border-box!important;width:100%!important;min-width:0!important;max-width:100%!important;height:100%!important;min-height:100%!important;max-height:100%!important;margin:0!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot{display:flex!important;position:absolute!important;z-index:6!important;top:0!important;left:50%!important;width:max-content!important;height:24px!important;padding:0 5px!important;align-items:center!important;justify-content:center!important;background:var(--SmartThemeBlurTintColor,var(--slb-surface))!important;transform:translateX(-50%)!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot>.slb-filter-exclude{display:inline-flex!important;position:static!important;width:max-content!important;height:24px!important;margin:0!important;padding:0!important;align-items:center!important;gap:4px!important;background:transparent!important;font-size:.8em!important;white-space:nowrap!important;transform:none!important}
+#slb-ai-tools #slb-quick-options-host>.slb-quick-options{display:grid!important;grid-template-columns:minmax(0,1.48fr) minmax(0,1fr)!important;gap:5px 6px!important;width:100%!important;min-width:0!important;font-size:clamp(9px,2.35vw,.88em)!important}
+#slb-ai-tools #slb-quick-options-host>.slb-quick-options>label{display:inline-flex!important;min-width:0!important;align-items:center!important;gap:4px!important;white-space:nowrap!important;word-break:keep-all!important;overflow-wrap:normal!important}
+#slb-ai-tools #slb-quick-options-host>.slb-quick-options>label:last-child{grid-column:1/-1!important}
+@media(max-width:760px){
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:36px var(--slb-slot-h) 28px!important;column-gap:12px!important;padding:0!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot{height:36px!important;padding:0 2px!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] .slb-filter-title{font-size:clamp(10px,2.45vw,.76em)!important;line-height:1.12!important;white-space:normal!important;overflow-wrap:break-word!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot{grid-area:exclude!important;position:static!important;width:100%!important;height:28px!important;padding:0!important;background:transparent!important;transform:none!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot>.slb-filter-exclude{height:28px!important;margin-inline:auto!important;font-size:.76em!important}
+}`;
+    document.head.append(style);
+}
 
 function getSettings() {
     if (!extension_settings[EXTENSION_NAME] || typeof extension_settings[EXTENSION_NAME] !== 'object') {
@@ -2267,54 +2300,133 @@ function enhanceEntry(entry) {
     }
     if (filterRow) {
         filterRow.classList.add('slb-filter-grid');
-        Array.from(filterRow.children).forEach((column, index) => {
-            const control = queryCompatible(column, [
-                'select[name="characterFilter"]',
-                'select[name="character_filter"]',
-                'select[name="triggers"]',
-                'select[name="generationTriggers"]',
-                'select',
-            ]);
-            column.classList.add('slb-filter-column', `slb-filter-column-${index + 1}`);
-            if (control?.name) column.dataset.slbField = control.name;
-
-            const controlWrap = control?.closest('.range-block-range, .world_entry_filter_control, [data-role="filter-control"]');
-            controlWrap?.classList.add('slb-filter-control');
-            const header = Array.from(column.children).find(child => child !== controlWrap && queryCompatible(child, [
-                ':scope > small',
-                ':scope > label',
-                ':scope > .world_entry_form_label',
-                ':scope > [data-role="filter-label"]',
-                'small',
-                'label',
-                '.world_entry_form_label',
-                '[data-role="filter-label"]',
-            ])) || controlWrap?.previousElementSibling;
-            header?.classList.add('slb-filter-column-header');
-            const excludeInput = queryCompatible(header, [
+        /*
+         * SillyTavern 버전/테마마다 이 영역의 native header가 flex/grid로 달라진다.
+         * header 안의 요소에 grid 좌표만 주면 일부 모바일 브라우저에서 제목이
+         * 잘리거나 Exclude가 제목을 밀어낸다. 기능 요소 자체를 복제하지 않고
+         * 원래 노드를 outer row의 고정 slot으로 한 번만 이동해 구조를 정규화한다.
+         */
+        if (filterRow.dataset.slbFilterLayout !== 'slots-v1') {
+            const nativeChildren = Array.from(filterRow.children);
+            const controlDefinitions = [
+                {
+                    selectors: [
+                        'select[name="characterFilter"]',
+                        'select[name="character_filter"]',
+                        'select[name="entryCharacterFilter"]',
+                        'select.world_entry_character_filter',
+                        'select.entry-character-filter',
+                    ],
+                    fallback: characterFilterControl,
+                    fallbackTitle: 'Filter to Characters or Tags',
+                },
+                {
+                    selectors: [
+                        'select[name="triggers"]',
+                        'select[name="generationTriggers"]',
+                        'select[name="generation_triggers"]',
+                        'select.world_entry_generation_trigger_filter',
+                        'select.entry-generation-trigger-filter',
+                    ],
+                    fallbackTitle: 'Filter to Generation Triggers',
+                },
+            ];
+            const excludeInput = queryCompatible(filterRow, [
                 'input[name="character_exclusion"]',
                 'input[name="characterExclusion"]',
                 'input[name="excludeCharacterFilter"]',
                 'input[data-role="exclude-filter"]',
             ]);
-            const excludeLabel = queryCompatible(header, [
+            let excludeLabel = queryCompatible(filterRow, [
                 'label[for="character_exclusion"]',
                 'label[for="characterExclusion"]',
                 '.character_exclusion',
                 '[data-role="exclude-filter"]',
             ]) || excludeInput?.closest('label, .checkbox_label');
-            excludeLabel?.classList.add('slb-filter-exclude');
-
-            const placeholderInput = queryCompatible(header, [
+            if (!excludeLabel && excludeInput) {
+                excludeLabel = createElement('label', 'checkbox_label');
+                excludeLabel.append(excludeInput, document.createTextNode(' Exclude'));
+            }
+            const placeholderInput = queryCompatible(filterRow, [
                 'input[name="__invisible"]',
                 'input[data-role="filter-placeholder"]',
             ]);
-            const placeholderLabel = queryCompatible(header, [
+            const placeholderLabel = queryCompatible(filterRow, [
                 'label[for="__invisible"]',
                 '[data-role="filter-placeholder"]',
             ]) || placeholderInput?.closest('label, .checkbox_label');
-            placeholderLabel?.classList.add('slb-filter-placeholder');
-        });
+
+            const layoutItems = controlDefinitions.map((definition, index) => {
+                const control = queryCompatible(filterRow, definition.selectors) || definition.fallback;
+                if (!control) return null;
+
+                const nativeColumn = nativeChildren.find(child => child.contains(control));
+                const controlWrap = control.closest('.range-block-range, .world_entry_filter_control, [data-role="filter-control"]') || control;
+                const header = nativeColumn
+                    ? Array.from(nativeColumn.children).find(child => child !== controlWrap && child.contains(control) === false && queryCompatible(child, [
+                        ':scope > small',
+                        ':scope > label',
+                        ':scope > .world_entry_form_label',
+                        ':scope > [data-role="filter-label"]',
+                        'small',
+                        'label',
+                        '.world_entry_form_label',
+                        '[data-role="filter-label"]',
+                    ])) || controlWrap.previousElementSibling
+                    : null;
+                const directTitleCandidates = header ? Array.from(header.children) : [];
+                const titleSelectors = 'small, .world_entry_form_label, [data-role="filter-label"], label';
+                const isUsableTitle = candidate => candidate
+                    && candidate !== excludeLabel
+                    && candidate !== placeholderLabel
+                    && !excludeLabel?.contains(candidate)
+                    && !placeholderLabel?.contains(candidate)
+                    && !candidate.querySelector?.('input, select, textarea')
+                    && Boolean(candidate.textContent?.replace(/\s+/g, ' ').trim());
+                let title = directTitleCandidates.find(candidate => candidate.matches?.(titleSelectors) && isUsableTitle(candidate));
+                if (!title && header) {
+                    title = Array.from(header.querySelectorAll(titleSelectors)).find(isUsableTitle);
+                }
+                if (!title) title = createElement('small', '', definition.fallbackTitle);
+
+                return { control, controlWrap, nativeColumn, title, index };
+            });
+
+            /* 두 기능 select를 모두 찾았을 때만 native row를 교체한다. */
+            if (layoutItems.every(Boolean)) {
+                const fragment = document.createDocumentFragment();
+                const titleSlots = [];
+                const controlSlots = [];
+
+                layoutItems.forEach(({ control, controlWrap, title, index }) => {
+                    const number = index + 1;
+                    const titleSlot = createElement('div', `slb-filter-title-slot slb-filter-title-slot-${number}`);
+                    title.classList.add('slb-filter-title', `slb-filter-title-${number}`);
+                    title.title = title.textContent?.replace(/\s+/g, ' ').trim() || '';
+                    titleSlot.append(title);
+
+                    const controlSlot = createElement('div', `slb-filter-control-slot slb-filter-control-slot-${number}`);
+                    controlSlot.dataset.slbField = control.name || '';
+                    controlWrap.classList.add('slb-filter-control');
+                    controlSlot.append(controlWrap);
+                    titleSlots.push(titleSlot);
+                    controlSlots.push(controlSlot);
+                });
+
+                const excludeSlot = createElement('div', 'slb-filter-exclude-slot');
+                if (excludeLabel) {
+                    excludeLabel.classList.add('slb-filter-exclude');
+                    if (excludeInput && !excludeLabel.contains(excludeInput)) excludeSlot.append(excludeInput);
+                    excludeSlot.append(excludeLabel);
+                }
+                if (placeholderLabel) placeholderLabel.classList.add('slb-filter-placeholder');
+
+                /* DOM 순서는 읽기 순서와 동일, 실제 위치는 slot별 CSS grid-area가 맡는다. */
+                fragment.append(titleSlots[0], titleSlots[1], controlSlots[0], controlSlots[1], excludeSlot);
+                filterRow.replaceChildren(fragment);
+                filterRow.dataset.slbFilterLayout = 'slots-v1';
+            }
+        }
         panels.filter.append(filterRow);
     }
     if (matchingSources) {
@@ -2780,6 +2892,7 @@ function scheduleTokenSummary(data = null, delay = 500) {
 
 function enhanceAll() {
     if (state.sorting) return;
+    ensureCriticalLayoutStyles();
     createAIBar();
     createWorkspace();
     hideNativeHeaderRows();
@@ -2849,6 +2962,7 @@ function init() {
     loadPersistedTokenCache();
     installEntryStateFilter();
     worldInfo.classList.add('slb-active');
+    ensureCriticalLayoutStyles();
     createAIBar();
     createWorkspace();
     bindEvents();
