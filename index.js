@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.22';
+const VERSION = '1.3.23';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -60,6 +60,8 @@ const state = {
     currentBookData: null,
     workspace: null,
     observer: null,
+    workspaceObserver: null,
+    workspaceObserverTarget: null,
     refreshTimer: null,
     tokenTimer: null,
     tokenRenderTimer: null,
@@ -1066,15 +1068,7 @@ function createSummarySection(id, title, iconClass, body, settingKey) {
     return section;
 }
 
-function createWorkspace() {
-    const popup = document.getElementById('world_popup');
-    const entries = document.getElementById('world_popup_entries_list');
-    if (!popup || !entries) return;
-    if (document.getElementById('slb-token-strip')) {
-        syncQuickTranslationOptionsPlacement();
-        return;
-    }
-
+function createTokenStrip() {
     const tokens = createElement('div', 'slb-token-strip');
     tokens.id = 'slb-token-strip';
     tokens.innerHTML = `
@@ -1083,7 +1077,10 @@ function createWorkspace() {
         <span>선택 주입 🟢 <strong id="slb-selective-tokens">—</strong></span>
         <span>벡터화 🔗 <strong id="slb-vectorized-tokens">—</strong></span>
         <span>항목 수 <strong id="slb-entry-count">—</strong></span>`;
+    return tokens;
+}
 
+function createEntryFilters() {
     const filters = createElement('div', 'slb-entry-filters');
     filters.id = 'slb-entry-filters';
     filters.innerHTML = `
@@ -1091,44 +1088,88 @@ function createWorkspace() {
         <button type="button" class="menu_button slb-filter-button" data-filter="constant">상시 주입 🔵</button>
         <button type="button" class="menu_button slb-filter-button" data-filter="normal">선택 주입 🟢</button>
         <button type="button" class="menu_button slb-filter-button" data-filter="vectorized">벡터화 🔗</button>`;
+    return filters;
+}
 
-    const tokenSection = createSummarySection('slb-token-summary-section', '토큰 통계', 'fa-solid fa-calculator', tokens, 'tokenSummaryCollapsed');
-    const filterSection = createSummarySection('slb-entry-filters-section', '항목 필터', 'fa-solid fa-filter', filters, 'entryFiltersCollapsed');
-    popup.insertBefore(tokenSection, entries);
-    popup.insertBefore(filterSection, entries);
-    syncQuickTranslationOptionsPlacement();
+function handleEntryFilterClick(event) {
+    const filters = event.currentTarget;
+    if (!(filters instanceof Element)) return;
+    const button = event.target instanceof Element ? event.target.closest('.slb-filter-button') : null;
+    if (!button || !filters.contains(button)) return;
+    const value = button.dataset.filter || 'all';
+    getSettings().entryFilter = value;
+    saveSettingsDebounced();
     syncFilterButtons();
+    worldInfoFilter.setFilterData(ENTRY_STATE_FILTER, value);
+}
 
-    filters.addEventListener('click', event => {
-        const button = event.target.closest('.slb-filter-button');
-        if (!button) return;
-        const value = button.dataset.filter || 'all';
-        getSettings().entryFilter = value;
-        saveSettingsDebounced();
-        syncFilterButtons();
-        worldInfoFilter.setFilterData(ENTRY_STATE_FILTER, value);
-    });
+function bindEntryFilterControls(filters) {
+    if (filters.dataset.slbFilterBound === 'true') return;
+    filters.dataset.slbFilterBound = 'true';
+    filters.addEventListener('click', handleEntryFilterClick);
+}
 
-    entries.addEventListener('input', event => {
-        const entry = event.target.closest('.world_entry');
-        if (!entry) return;
-        const uid = getUid(entry);
-        if (event.target.matches('select[name="entryStateSelector"]')) {
-            setTimeout(() => syncEntryInjectionState(entry), 0);
-        }
-        if (event.target.matches('textarea[name="content"]')) {
-            scheduleEntryTokenCount(currentBookName(), uid, event.target.value);
-        }
-    }, true);
+function ensureWorkspaceSummarySection({ id, bodyId, title, iconClass, settingKey, createBody }) {
+    let section = document.getElementById(id);
+    let body = document.getElementById(bodyId);
+    const valid = section
+        && body
+        && section.contains(body)
+        && section.querySelector('.slb-summary-toggle')
+        && section.querySelector('.slb-summary-body');
 
-    entries.addEventListener('click', event => {
-        const killSwitch = event.target.closest('[name="entryKillSwitch"]');
-        if (!killSwitch) return;
-        const entry = killSwitch.closest('.world_entry');
-        // SillyTavern changes its data and classes synchronously in the target
-        // click handler. Read that new state after the event reaches us.
-        setTimeout(() => syncEntryActiveState(entry), 0);
-    });
+    if (!valid) {
+        body = body || createBody();
+        section?.remove();
+        section = createSummarySection(id, title, iconClass, body, settingKey);
+    } else {
+        setSummarySectionCollapsed(section, Boolean(getSettings()[settingKey]));
+    }
+
+    return { section, body };
+}
+
+function handleWorkspaceEntryInput(event) {
+    if (!(event.target instanceof Element)) return;
+    const entry = event.target.closest('.world_entry');
+    if (!entry) return;
+    const uid = getUid(entry);
+    if (event.target.matches('select[name="entryStateSelector"]')) {
+        setTimeout(() => syncEntryInjectionState(entry), 0);
+    }
+    if (event.target.matches('textarea[name="content"]')) {
+        scheduleEntryTokenCount(currentBookName(), uid, event.target.value);
+    }
+}
+
+function handleWorkspaceEntryClick(event) {
+    if (!(event.target instanceof Element)) return;
+    const killSwitch = event.target.closest('[name="entryKillSwitch"]');
+    if (!killSwitch) return;
+    const entry = killSwitch.closest('.world_entry');
+    // SillyTavern changes its data and classes synchronously in the target
+    // click handler. Read that new state after the event reaches us.
+    setTimeout(() => syncEntryActiveState(entry), 0);
+}
+
+function unbindWorkspaceEntries() {
+    const previousEntries = state.workspace?.entries;
+    if (previousEntries) {
+        previousEntries.removeEventListener('input', handleWorkspaceEntryInput, true);
+        previousEntries.removeEventListener('click', handleWorkspaceEntryClick);
+        jQuery(previousEntries).off('sortstart.slb sortstop.slb');
+    }
+    state.observer?.disconnect();
+    state.observer = null;
+    state.workspace = null;
+}
+
+function bindWorkspaceEntries(entries) {
+    if (state.workspace?.entries === entries && state.observer) return;
+    unbindWorkspaceEntries();
+
+    entries.addEventListener('input', handleWorkspaceEntryInput, true);
+    entries.addEventListener('click', handleWorkspaceEntryClick);
 
     state.observer = new MutationObserver(mutations => {
         // 네이티브 드래그 정렬 중에는 jQuery UI가 헬퍼/플레이스홀더를 만들면서
@@ -1138,7 +1179,11 @@ function createWorkspace() {
         let listChanged = false;
         let entryChanged = false;
         for (const mutation of mutations) {
-            if (mutation.type === 'attributes' && mutation.target.matches('[name="entryKillSwitch"]')) {
+            if (
+                mutation.type === 'attributes'
+                && mutation.target instanceof Element
+                && mutation.target.matches('[name="entryKillSwitch"]')
+            ) {
                 syncEntryActiveState(mutation.target.closest('.world_entry'));
                 continue;
             }
@@ -1166,6 +1211,73 @@ function createWorkspace() {
             state.navigatorDirty = true;
             scheduleEnhance();
         });
+
+    state.workspace = { entries };
+}
+
+function bindWorkspacePopupObserver(popup) {
+    const observerTarget = document.getElementById('WorldInfo') || popup;
+    if (state.workspaceObserverTarget === observerTarget && state.workspaceObserver) return;
+    state.workspaceObserver?.disconnect();
+    state.workspaceObserverTarget = observerTarget;
+    state.workspaceObserver = new MutationObserver(mutations => {
+        if (!mutations.some(mutation => mutation.type === 'childList')) return;
+
+        const livePopup = document.getElementById('world_popup');
+        const liveEntries = document.getElementById('world_popup_entries_list');
+        const tokenSection = document.getElementById('slb-token-summary-section');
+        const filterSection = document.getElementById('slb-entry-filters-section');
+        const workspaceMissing = !livePopup
+            || !liveEntries
+            || liveEntries.parentElement !== livePopup
+            || !tokenSection
+            || tokenSection.parentElement !== livePopup
+            || !tokenSection.querySelector('#slb-token-strip')
+            || !filterSection
+            || filterSection.parentElement !== livePopup
+            || !filterSection.querySelector('#slb-entry-filters')
+            || tokenSection.nextElementSibling !== filterSection
+            || filterSection.nextElementSibling !== liveEntries
+            || state.workspace?.entries !== liveEntries;
+
+        // If the entire popup is temporarily detached, wait for its insertion
+        // mutation instead of scheduling an empty retry loop.
+        if (workspaceMissing && livePopup && liveEntries) scheduleEnhance();
+    });
+    state.workspaceObserver.observe(observerTarget, { childList: true, subtree: true });
+}
+
+function createWorkspace() {
+    const popup = document.getElementById('world_popup');
+    const entries = document.getElementById('world_popup_entries_list');
+    if (!popup || !entries) return;
+
+    const { section: tokenSection } = ensureWorkspaceSummarySection({
+        id: 'slb-token-summary-section',
+        bodyId: 'slb-token-strip',
+        title: '토큰 통계',
+        iconClass: 'fa-solid fa-calculator',
+        settingKey: 'tokenSummaryCollapsed',
+        createBody: createTokenStrip,
+    });
+    const { section: filterSection, body: filters } = ensureWorkspaceSummarySection({
+        id: 'slb-entry-filters-section',
+        bodyId: 'slb-entry-filters',
+        title: '항목 필터',
+        iconClass: 'fa-solid fa-filter',
+        settingKey: 'entryFiltersCollapsed',
+        createBody: createEntryFilters,
+    });
+
+    bindEntryFilterControls(filters);
+    // Keep both extension sections together immediately before the current
+    // live entries list. Reinsert only when needed to avoid observer loops.
+    if (filterSection.nextElementSibling !== entries) popup.insertBefore(filterSection, entries);
+    if (tokenSection.nextElementSibling !== filterSection) popup.insertBefore(tokenSection, filterSection);
+    bindWorkspaceEntries(entries);
+    bindWorkspacePopupObserver(popup);
+    syncQuickTranslationOptionsPlacement();
+    syncFilterButtons();
 }
 
 function installEntryStateFilter() {
