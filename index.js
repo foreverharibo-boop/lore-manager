@@ -11,11 +11,13 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.8';
+const VERSION = '1.3.9';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
 const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)';
+const FULL_HEADER_FIELDS_MIN_WIDTH = 580;
+const HEADER_LAYOUT_SAFETY_GAP = 24;
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
     language: 'Korean',
@@ -61,6 +63,8 @@ const state = {
     sourceTimers: new Map(),
     translationTimers: new Map(),
     responsiveMedia: null,
+    responsiveObserver: null,
+    responsiveRaf: 0,
 };
 
 function getSettings() {
@@ -735,12 +739,25 @@ function syncEntryHeaderActions(entry) {
         && child.classList?.contains('menu_button')
     ));
     actions.append(...orphanActions);
+    if (orphanActions.length) scheduleResponsiveEntryLayouts();
+}
+
+function observeResponsiveHeader(entry) {
+    if (!state.responsiveObserver || !entry) return;
+    for (const element of [
+        entry.querySelector('.slb-entry-header-shell'),
+        entry.querySelector('.slb-header-toggles'),
+        entry.querySelector('.slb-header-actions'),
+    ]) {
+        if (element) state.responsiveObserver.observe(element);
+    }
 }
 
 function enhanceEntryHeader(entry) {
     if (!entry) return;
     if (entry.dataset.slbHeaderEnhanced === VERSION) {
         syncEntryHeaderActions(entry);
+        observeResponsiveHeader(entry);
         return;
     }
 
@@ -802,6 +819,7 @@ function enhanceEntryHeader(entry) {
     thinControls.remove();
 
     entry.dataset.slbHeaderEnhanced = VERSION;
+    observeResponsiveHeader(entry);
     placeResponsiveHeaderFields(entry);
 }
 
@@ -835,6 +853,26 @@ function syncEntryInjectionState(entry) {
     }
 }
 
+function shouldUseCompactHeader(entry) {
+    const narrowViewport = state.responsiveMedia?.matches
+        ?? window.matchMedia('(max-width: 760px)').matches;
+    if (narrowViewport) return true;
+
+    const shell = entry?.querySelector('.slb-entry-header-shell');
+    if (!shell) return false;
+    const availableWidth = shell.clientWidth || shell.getBoundingClientRect().width;
+    if (!availableWidth) return false;
+
+    const measuredWidth = element => {
+        if (!element) return 0;
+        return Math.ceil(Math.max(element.scrollWidth, element.getBoundingClientRect().width));
+    };
+    const reservedWidth = measuredWidth(entry.querySelector('.slb-header-toggles'))
+        + measuredWidth(entry.querySelector('.slb-header-actions'))
+        + HEADER_LAYOUT_SAFETY_GAP;
+    return availableWidth < FULL_HEADER_FIELDS_MIN_WIDTH + reservedWidth;
+}
+
 function placeResponsiveHeaderFields(entry) {
     if (!entry) return;
     const grid = entry.querySelector('.slb-header-grid');
@@ -849,15 +887,24 @@ function placeResponsiveHeaderFields(entry) {
         entry.querySelector('.slb-order-field'),
         entry.querySelector('.slb-trigger-field'),
     ].filter(Boolean);
-    const mobile = window.matchMedia('(max-width: 760px)').matches;
-    const target = mobile ? (overview || stash) : grid;
-    target.append(...fields);
-    grid.classList.toggle('slb-header-title-only', mobile);
-    if (overview) overview.hidden = !mobile;
+    const compact = shouldUseCompactHeader(entry);
+    const target = compact ? (overview || stash) : grid;
+    if (fields.some(field => field.parentElement !== target)) target.append(...fields);
+    entry.classList.toggle('slb-compact-entry', compact);
+    grid.classList.toggle('slb-header-title-only', compact);
+    if (overview) overview.hidden = !compact;
 }
 
 function syncResponsiveEntryLayouts() {
     renderedEntries().forEach(placeResponsiveHeaderFields);
+}
+
+function scheduleResponsiveEntryLayouts() {
+    if (state.responsiveRaf) cancelAnimationFrame(state.responsiveRaf);
+    state.responsiveRaf = requestAnimationFrame(() => {
+        state.responsiveRaf = 0;
+        syncResponsiveEntryLayouts();
+    });
 }
 
 function entryLabel(entry) {
@@ -1939,11 +1986,15 @@ function init() {
     createWorkspace();
     bindEvents();
     state.responsiveMedia = window.matchMedia('(max-width: 760px)');
-    const responsiveListener = () => syncResponsiveEntryLayouts();
+    const responsiveListener = () => scheduleResponsiveEntryLayouts();
     if (typeof state.responsiveMedia.addEventListener === 'function') {
         state.responsiveMedia.addEventListener('change', responsiveListener);
     } else if (typeof state.responsiveMedia.addListener === 'function') {
         state.responsiveMedia.addListener(responsiveListener);
+    }
+    window.addEventListener('resize', responsiveListener, { passive: true });
+    if (typeof ResizeObserver === 'function') {
+        state.responsiveObserver = new ResizeObserver(() => scheduleResponsiveEntryLayouts());
     }
     scheduleEnhance();
     scheduleTokenSummary();

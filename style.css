@@ -1298,3 +1298,116 @@
         padding: 0;
     }
 }
+
+/* v1.3.9 — switch by the entry row's real width, including extra action icons. */
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-entry-header-shell {
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 6px;
+    align-items: center;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-header-toggles {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+    padding: 0;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-header-title-only {
+    display: block !important;
+    grid-column: 2;
+    grid-row: 1;
+    width: 100%;
+    min-width: 0;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-header-title-only .slb-title-field {
+    display: block !important;
+    width: 100%;
+    min-width: 0;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-header-title-only .slb-title-field > .slb-header-label {
+    display: none !important;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-header-title-only .slb-title-field > textarea {
+    display: block !important;
+    grid-column: auto !important;
+    grid-row: auto !important;
+    width: 100% !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    margin: 0 !important;
+    overflow: hidden;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-header-actions {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: center;
+    padding: 0;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview {
+    grid-template-columns: 74px minmax(142px, 1fr) 68px;
+    grid-template-rows: repeat(2, 58px);
+    gap: 8px;
+    justify-content: start;
+    align-items: end;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-header-field {
+    display: grid !important;
+    box-sizing: border-box;
+    grid-template-rows: 22px 32px;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    margin: 0 !important;
+    align-self: end;
+    justify-self: stretch;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-strategy-field {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-position-field {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-depth-field {
+    grid-column: 3;
+    grid-row: 1;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-order-field {
+    grid-column: 1;
+    grid-row: 2;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-trigger-field {
+    grid-column: 2;
+    grid-row: 2;
+    width: 104px !important;
+    justify-self: start;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-header-label {
+    justify-content: center !important;
+    text-align: center !important;
+}
+
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview select,
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview input {
+    box-sizing: border-box;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+}
