@@ -989,15 +989,103 @@
 
 @media (max-width: 760px) {
     #WorldInfo.slb-active .world_entry .slb-activation-overview {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: 74px minmax(142px, 1fr) 68px;
+        grid-template-rows: repeat(2, 58px);
+        gap: 8px;
+        justify-content: start;
+        align-items: end;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field {
+        box-sizing: border-box;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: none !important;
+        margin: 0 !important;
+        align-self: end;
+        justify-self: stretch;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-strategy-field {
+        grid-column: 1;
+        grid-row: 1;
     }
 
     #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-position-field {
         grid-column: 2;
+        grid-row: 1;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field {
+        grid-column: 3;
+        grid-row: 1;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field {
+        grid-column: 1;
+        grid-row: 2;
     }
 
     #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field {
-        grid-column: 1 / -1;
+        grid-column: 2;
+        grid-row: 2;
+        width: 104px !important;
+        justify-self: start;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-label {
+        justify-content: center !important;
+        text-align: center !important;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview select,
+    #WorldInfo.slb-active .world_entry .slb-activation-overview input {
+        box-sizing: border-box;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px !important;
+        width: 100% !important;
+        align-items: stretch;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid > .slb-filter-column {
+        display: grid !important;
+        grid-template-rows: 52px 116px;
+        min-width: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        align-items: stretch;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid > .slb-filter-column > :first-child {
+        box-sizing: border-box;
+        min-height: 52px;
+        margin: 0 !important;
+        align-items: end !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .range-block-range,
+    #WorldInfo.slb-active .slb-filter-grid .select2-container {
+        box-sizing: border-box;
+        width: 100% !important;
+        min-width: 0 !important;
+        height: 116px !important;
+        margin: 0 !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .select2-selection--multiple {
+        box-sizing: border-box;
+        height: 116px !important;
+        min-height: 116px !important;
+        max-height: 116px !important;
+        overflow-y: auto;
     }
 }
 

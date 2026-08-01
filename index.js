@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.5';
+const VERSION = '1.3.6';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -592,8 +592,8 @@ function createWorkspace() {
     tokens.id = 'slb-token-strip';
     tokens.innerHTML = `
         <span>전체 항목 <strong id="slb-total-tokens">—</strong></span>
-        <span>선택 주입 🟢 <strong id="slb-selective-tokens">—</strong></span>
         <span>상시 주입 🔵 <strong id="slb-constant-tokens">—</strong></span>
+        <span>선택 주입 🟢 <strong id="slb-selective-tokens">—</strong></span>
         <span>벡터화 🔗 <strong id="slb-vectorized-tokens">—</strong></span>
         <span>항목 수 <strong id="slb-entry-count">—</strong></span>`;
 
@@ -602,8 +602,9 @@ function createWorkspace() {
     filters.innerHTML = `
         <small>항목 필터</small>
         <button type="button" class="menu_button slb-filter-button" data-filter="all">전체</button>
+        <button type="button" class="menu_button slb-filter-button" data-filter="constant">상시 주입 🔵</button>
         <button type="button" class="menu_button slb-filter-button" data-filter="normal">선택 주입 🟢</button>
-        <button type="button" class="menu_button slb-filter-button" data-filter="constant">상시 주입 🔵</button>`;
+        <button type="button" class="menu_button slb-filter-button" data-filter="vectorized">벡터화 🔗</button>`;
 
     popup.insertBefore(tokens, entries);
     popup.insertBefore(filters, entries);
@@ -684,6 +685,7 @@ function installEntryStateFilter() {
             const filter = worldInfoFilter.getFilterData(ENTRY_STATE_FILTER) || 'all';
             if (filter === 'constant') return data.filter(entry => Boolean(entry.constant));
             if (filter === 'normal') return data.filter(entry => !entry.constant && !entry.vectorized);
+            if (filter === 'vectorized') return data.filter(entry => Boolean(entry.vectorized));
             return data;
         };
     }
@@ -1381,7 +1383,11 @@ function enhanceEntry(entry) {
         });
         panels.group.append(groupRow);
     }
-    if (filterRow) panels.filter.append(filterRow);
+    if (filterRow) {
+        filterRow.classList.add('slb-filter-grid');
+        Array.from(filterRow.children).forEach(column => column.classList.add('slb-filter-column'));
+        panels.filter.append(filterRow);
+    }
     if (bottomControls) panels.filter.append(bottomControls);
     if (matchingSources) panels.filter.append(matchingSources);
 
@@ -1647,7 +1653,7 @@ function renderTokenSummary(book, data) {
         : vectorizedReadyCount
             ? `${vectorized.toLocaleString()} 토큰 · 계산 중…`
             : (vectorizedCount ? '계산 중…' : '0 토큰');
-    countElement.textContent = `${entries.length}개 · 활성 ${activeCount}개 · 선택 ${selectiveCount}개 · 상시 ${constantCount}개 · 벡터 ${vectorizedCount}개`;
+    countElement.textContent = `${entries.length}개 · 활성 ${activeCount}개 · 상시 ${constantCount}개 · 선택 ${selectiveCount}개 · 벡터 ${vectorizedCount}개`;
 }
 
 function queueTokenSummaryRender(book, data) {
