@@ -1631,7 +1631,7 @@
     }
 }
 
-/* v1.3.16 — dense single-row mobile controls and cross-version field recovery */
+/* v1.3.17 — fixed-width activation controls and precisely aligned mobile filters */
 @media (max-width: 760px) {
     #WorldInfo.slb-active #world_popup_entries_list > .world_entry {
         margin-bottom: 5px;
@@ -1669,25 +1669,29 @@
 
     #WorldInfo.slb-active .world_entry .slb-activation-overview,
     #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview {
-        grid-template-columns: 46px minmax(92px, 1fr) 38px 44px 66px;
-        grid-template-rows: 41px;
+        grid-template-columns: 38px 104px repeat(3, 48px);
+        grid-template-rows: 37px;
         gap: 3px;
-        margin-bottom: 5px;
-        padding-bottom: 5px;
-        align-items: end;
+        justify-content: start;
+        align-items: start;
+        margin: 0 0 8px !important;
+        padding: 0 !important;
+        border-bottom: 0 !important;
     }
 
     #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field,
     #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-header-field {
-        grid-template-rows: 15px 26px;
+        grid-template-rows: 14px 23px;
+        width: 100% !important;
+        max-width: 100% !important;
     }
 
     #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-label {
         box-sizing: border-box;
-        height: 15px;
-        min-height: 15px;
+        height: 14px;
+        min-height: 14px;
         overflow: hidden;
-        font-size: 0.6em;
+        font-size: 0.56em;
         line-height: 1;
         text-overflow: clip;
         white-space: nowrap;
@@ -1695,11 +1699,12 @@
 
     #WorldInfo.slb-active .world_entry .slb-activation-overview select,
     #WorldInfo.slb-active .world_entry .slb-activation-overview input {
-        height: 26px !important;
-        min-height: 26px !important;
-        max-height: 26px !important;
-        padding: 1px 3px !important;
-        font-size: 0.72em;
+        width: 100% !important;
+        height: 23px !important;
+        min-height: 23px !important;
+        max-height: 23px !important;
+        padding: 0 3px !important;
+        font-size: 0.67em;
     }
 
     #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-strategy-field,
@@ -1777,7 +1782,7 @@
         display: grid !important;
         grid-template-columns: minmax(0, 1fr) 70px minmax(0, 1fr);
         gap: 4px !important;
-        align-items: end !important;
+        align-items: start !important;
         width: 100% !important;
     }
 
@@ -1787,19 +1792,23 @@
         min-width: 0 !important;
         width: 100% !important;
         margin: 0 !important;
+        align-self: start !important;
     }
 
     #WorldInfo.slb-active .slb-keyword-grid > .slb-keyword-core-field > small {
-        min-height: 17px;
+        height: 16px;
+        min-height: 16px;
         margin: 0 !important;
-        font-size: 0.72em;
+        font-size: 0.68em;
         line-height: 1;
+        text-align: center;
     }
 
     #WorldInfo.slb-active .slb-keyword-grid select[name="entryLogicType"] {
         width: 100% !important;
-        height: 29px !important;
-        min-height: 29px !important;
+        height: 27px !important;
+        min-height: 27px !important;
+        max-height: 27px !important;
         margin: 0 !important;
         padding-block: 1px !important;
         font-size: 0.8em;
@@ -1947,55 +1956,96 @@
 
     #WorldInfo.slb-active .slb-filter-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-        gap: 6px !important;
+        grid-template-rows: 98px;
+        position: relative;
+        column-gap: 42px !important;
+        row-gap: 0 !important;
         align-items: start !important;
     }
 
     #WorldInfo.slb-active .slb-filter-grid > .slb-filter-column {
         display: grid !important;
-        grid-template-rows: auto auto;
-        gap: 4px;
+        grid-template-rows: 18px 78px;
+        gap: 2px;
         align-content: start !important;
         align-items: start !important;
         overflow: visible !important;
+        height: 98px !important;
+        min-height: 98px !important;
+        max-height: 98px !important;
     }
 
     #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header {
-        display: grid !important;
-        grid-template-columns: minmax(0, 1fr) max-content;
-        gap: 3px;
-        min-height: 31px !important;
+        display: flex !important;
+        position: static !important;
+        justify-content: center !important;
+        align-items: center !important;
+        box-sizing: border-box;
+        width: 100% !important;
+        height: 18px !important;
+        min-height: 18px !important;
+        max-height: 18px !important;
         margin: 0 !important;
-        align-items: end !important;
-        font-size: 0.7em;
-        line-height: 1.1;
+        padding: 0 !important;
+        font-size: 0.56em;
+        line-height: 1;
+        text-align: center;
     }
 
     #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > small {
+        display: block;
+        width: 100%;
         min-width: 0;
         margin: 0 !important;
-        line-height: 1.15;
+        overflow: visible;
+        line-height: 1;
+        text-align: center;
+        white-space: nowrap;
     }
 
     #WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude {
         display: inline-flex !important;
-        min-width: max-content;
+        position: absolute !important;
+        z-index: 2;
+        top: 1px;
+        left: 50%;
+        transform: translateX(-50%);
+        box-sizing: border-box;
+        width: max-content !important;
+        min-width: 0 !important;
+        height: 15px !important;
+        min-height: 15px !important;
         margin: 0 !important;
+        padding: 0 2px !important;
         align-items: center !important;
-        gap: 2px !important;
+        gap: 1px !important;
+        background: var(--SmartThemeBlurTintColor, var(--slb-surface));
+        border-radius: 3px;
+        font-size: 0.5em !important;
+        line-height: 1 !important;
         white-space: nowrap;
     }
 
     #WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude input[type="checkbox"] {
-        width: 17px !important;
-        min-width: 17px !important;
-        height: 17px !important;
-        min-height: 17px !important;
+        width: 11px !important;
+        min-width: 11px !important;
+        max-width: 11px !important;
+        height: 11px !important;
+        min-height: 11px !important;
+        max-height: 11px !important;
         margin: 0 !important;
     }
 
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude small,
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude span {
+        margin: 0 !important;
+        padding: 0 !important;
+        font-size: inherit !important;
+        line-height: 1 !important;
+    }
+
     #WorldInfo.slb-active .slb-filter-grid .slb-filter-placeholder {
-        visibility: hidden !important;
+        display: none !important;
         width: 0 !important;
         min-width: 0 !important;
         margin: 0 !important;
@@ -2007,7 +2057,9 @@
         box-sizing: border-box;
         width: 100% !important;
         min-width: 0 !important;
-        min-height: 0 !important;
+        height: 78px !important;
+        min-height: 78px !important;
+        max-height: 78px !important;
         margin: 0 !important;
     }
 
@@ -2027,10 +2079,19 @@
         line-height: 1.2;
     }
 
+    #WorldInfo.slb-active .slb-filter-grid .select2-container,
     #WorldInfo.slb-active .slb-filter-grid .select2-selection--multiple {
-        min-height: 31px !important;
+        box-sizing: border-box;
+        width: 100% !important;
+        height: 78px !important;
+        min-height: 78px !important;
+        max-height: 78px !important;
         margin: 0 !important;
-        font-size: 0.76em;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .select2-selection--multiple {
+        overflow-y: auto;
+        font-size: 0.72em;
     }
 
     #WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-matching-sources {
