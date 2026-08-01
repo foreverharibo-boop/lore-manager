@@ -10,7 +10,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.1.2';
+const VERSION = '1.1.3';
 const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry';
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
@@ -513,15 +513,9 @@ function createWorkspace() {
         const killSwitch = event.target.closest('[name="entryKillSwitch"]');
         if (!killSwitch) return;
         const entry = killSwitch.closest('.world_entry');
-        const uid = getUid(entry);
         // SillyTavern changes its data and classes synchronously in the target
         // click handler. Read that new state after the event reaches us.
-        queueMicrotask(() => {
-            const data = entryData(uid);
-            if (data) data.disable = killSwitch.classList.contains('fa-toggle-off');
-            updateNavigatorEntry(uid);
-            renderTokenSummary(currentBookName(), state.currentBookData);
-        });
+        setTimeout(() => syncEntryActiveState(entry), 0);
     });
 
     document.getElementById('OpenAllWIEntries')?.addEventListener('click', () => {
@@ -537,6 +531,10 @@ function createWorkspace() {
         let listChanged = false;
         let entryChanged = false;
         for (const mutation of mutations) {
+            if (mutation.type === 'attributes' && mutation.target.matches('[name="entryKillSwitch"]')) {
+                syncEntryActiveState(mutation.target.closest('.world_entry'));
+                continue;
+            }
             if (mutation.target === entries) listChanged = true;
             for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
                 if (!(node instanceof Element)) continue;
@@ -548,7 +546,7 @@ function createWorkspace() {
         if (listChanged) state.navigatorDirty = true;
         if (listChanged || entryChanged) scheduleEnhance();
     });
-    state.observer.observe(entries, { childList: true, subtree: true });
+    state.observer.observe(entries, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
 }
 
 function renderedEntries() {
@@ -643,6 +641,16 @@ function entryData(uid) {
     return state.currentBookData?.entries?.[uid]
         ?? state.currentBookData?.entries?.[Number(uid)]
         ?? null;
+}
+
+function syncEntryActiveState(entry) {
+    if (!entry) return;
+    const uid = getUid(entry);
+    const killSwitch = entry.querySelector('[name="entryKillSwitch"]');
+    const data = entryData(uid);
+    if (data && killSwitch) data.disable = killSwitch.classList.contains('fa-toggle-off');
+    updateNavigatorEntry(uid);
+    renderTokenSummary(currentBookName(), state.currentBookData);
 }
 
 function entryLabel(entry) {
@@ -1212,15 +1220,19 @@ function setTokenSummaryPending() {
 function scheduleEntryTokenCount(book, uid, content) {
     if (!book || !uid) return;
     const timerKey = `${book}:${uid}`;
+    const data = state.currentBookData;
+    const entry = data?.entries?.[uid] ?? data?.entries?.[Number(uid)];
+    if (entry) {
+        entry.content = content;
+        renderTokenSummary(book, data);
+    }
     clearTimeout(state.entryTokenTimers.get(timerKey));
     state.entryTokenTimers.set(timerKey, setTimeout(async () => {
         if (book !== currentBookName()) return;
-        const data = state.currentBookData;
-        const entry = data?.entries?.[uid] ?? data?.entries?.[Number(uid)];
-        if (!entry) return;
-        entry.content = content;
+        const latestData = state.currentBookData;
+        const latestSource = latestData?.entries?.[uid] ?? latestData?.entries?.[Number(uid)];
+        if (!latestSource || latestSource.content !== content) return;
         const contentHash = hashText(content);
-        renderTokenSummary(book, data);
         try {
             const count = Number(await getTokenCountAsync(content)) || 0;
             const latestEntry = state.currentBookData?.entries?.[uid]
@@ -1231,7 +1243,7 @@ function scheduleEntryTokenCount(book, uid, content) {
         } catch (error) {
             console.warn('[로어북 매니저] Failed to count entry tokens', error);
         }
-    }, 220));
+    }, 80));
 }
 
 async function refreshTokenSummary(forcedData = null) {
