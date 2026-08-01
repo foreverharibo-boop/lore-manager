@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.4';
+const VERSION = '1.3.5';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -60,6 +60,7 @@ const state = {
     navigatorSignature: '',
     sourceTimers: new Map(),
     translationTimers: new Map(),
+    responsiveMedia: null,
 };
 
 function getSettings() {
@@ -487,11 +488,11 @@ function createAIBar() {
                 </div>
                 <label class="slb-field slb-prompt-field"><small>번역 추가 지시문 · AI 프로필 모드에서만 적용</small>
                     <textarea id="slb-translate-prompt" class="text_pole" rows="3" placeholder="번역 언어는 위 설정을 자동으로 따릅니다. 문체·존칭·용어 같은 추가 요구사항만 적어주세요. 예) 대사는 반말로, 지문은 건조한 문어체로. (구글 번역에는 적용되지 않습니다)"></textarea>
+                    <span class="slb-prompt-meta">
+                        <small class="slb-ai-note">AI 수정·키워드 추천·원문 반영은 구글 번역 모드에서도 전용 프로필을 사용합니다.</small>
+                        <small id="slb-ai-status">확장 탭에서 번역 방식을 설정해주세요.</small>
+                    </span>
                 </label>
-                <div class="slb-prompt-meta">
-                    <small class="slb-ai-note">AI 수정·키워드 추천·원문 반영은 구글 번역 모드에서도 전용 프로필을 사용합니다.</small>
-                    <small id="slb-ai-status">확장 탭에서 번역 방식을 설정해주세요.</small>
-                </div>
                 <div class="slb-ai-options">
                     <label><input type="checkbox" id="slb-translate-missing"> 번역본 없는 항목을 열 때 자동 번역</label>
                     <label><input type="checkbox" id="slb-auto-translate"> 원문 변경 시 자동 번역</label>
@@ -593,6 +594,7 @@ function createWorkspace() {
         <span>전체 항목 <strong id="slb-total-tokens">—</strong></span>
         <span>선택 주입 🟢 <strong id="slb-selective-tokens">—</strong></span>
         <span>상시 주입 🔵 <strong id="slb-constant-tokens">—</strong></span>
+        <span>벡터화 🔗 <strong id="slb-vectorized-tokens">—</strong></span>
         <span>항목 수 <strong id="slb-entry-count">—</strong></span>`;
 
     const filters = createElement('div', 'slb-entry-filters');
@@ -772,7 +774,6 @@ function enhanceEntryHeader(entry) {
         entry.querySelector('.slb-order-field'),
         entry.querySelector('.slb-trigger-field'),
     ].filter(Boolean));
-    fields.classList.add('slb-header-title-only');
     fields.append(titleField);
 
     const nativeActions = Array.from(header.children).filter(child => child.classList?.contains('menu_button'));
@@ -783,6 +784,7 @@ function enhanceEntryHeader(entry) {
     thinControls.remove();
 
     entry.dataset.slbHeaderEnhanced = VERSION;
+    placeResponsiveHeaderFields(entry);
 }
 
 function entryData(uid) {
@@ -813,6 +815,31 @@ function syncEntryInjectionState(entry) {
     if ((getSettings().entryFilter || 'all') !== 'all') {
         document.getElementById('world_refresh')?.click();
     }
+}
+
+function placeResponsiveHeaderFields(entry) {
+    if (!entry) return;
+    const grid = entry.querySelector('.slb-header-grid');
+    const stash = entry.querySelector('.slb-deferred-header-fields');
+    const overview = entry.querySelector('.slb-activation-overview');
+    if (!grid || !stash) return;
+
+    const fields = [
+        entry.querySelector('.slb-strategy-field'),
+        entry.querySelector('.slb-position-field'),
+        entry.querySelector('.slb-depth-field'),
+        entry.querySelector('.slb-order-field'),
+        entry.querySelector('.slb-trigger-field'),
+    ].filter(Boolean);
+    const mobile = window.matchMedia('(max-width: 760px)').matches;
+    const target = mobile ? (overview || stash) : grid;
+    target.append(...fields);
+    grid.classList.toggle('slb-header-title-only', mobile);
+    if (overview) overview.hidden = !mobile;
+}
+
+function syncResponsiveEntryLayouts() {
+    renderedEntries().forEach(placeResponsiveHeaderFields);
 }
 
 function entryLabel(entry) {
@@ -1300,12 +1327,7 @@ function enhanceEntry(entry) {
     const filterRow = edit.querySelector('select[name="characterFilter"]')?.closest('.flex-container.wide100p.flexGap10');
     const bottomControls = edit.querySelector('[name="WIEntryBottomControls"]');
     const matchingSources = edit.querySelector('input[name="matchCharacterDescription"]')?.closest('.inline-drawer');
-    const deferredHeader = entry.querySelector('.slb-deferred-header-fields');
     const activationOverview = createElement('div', 'slb-activation-overview');
-    if (deferredHeader) {
-        activationOverview.append(...Array.from(deferredHeader.children));
-        deferredHeader.remove();
-    }
     const originalChildren = Array.from(edit.children);
 
     const tabbar = createElement('div', 'slb-tabbar');
@@ -1346,7 +1368,7 @@ function enhanceEntry(entry) {
     keywordAssistant.append(keywordHead, keywordHelp, keywordResults);
 
     panels.content.append(contentBlock, syncRow);
-    if (activationOverview.children.length) panels.activation.append(activationOverview);
+    panels.activation.append(activationOverview);
     panels.activation.append(keywordAssistant);
     if (activationContainer && activationContainer.isConnected) panels.activation.append(activationContainer);
     if (commentContainer && commentContainer.isConnected) panels.activation.append(commentContainer);
@@ -1369,6 +1391,7 @@ function enhanceEntry(entry) {
     }
 
     edit.replaceChildren(tabbar, panels.content, panels.activation, panels.group, panels.filter);
+    placeResponsiveHeaderFields(entry);
 
     function showTab(name) {
         tabs.forEach(tab => tab.classList.toggle('is-active', tab.dataset.tab === name));
@@ -1555,20 +1578,24 @@ function renderTokenSummary(book, data) {
     const totalElement = document.getElementById('slb-total-tokens');
     const selectiveElement = document.getElementById('slb-selective-tokens');
     const constantElement = document.getElementById('slb-constant-tokens');
+    const vectorizedElement = document.getElementById('slb-vectorized-tokens');
     const countElement = document.getElementById('slb-entry-count');
-    if (!totalElement || !selectiveElement || !constantElement || !countElement) return;
+    if (!totalElement || !selectiveElement || !constantElement || !vectorizedElement || !countElement) return;
 
     const entries = lorebookEntries(data);
     const cache = getBookTokenCache(book);
     let total = 0;
     let selective = 0;
     let constant = 0;
+    let vectorized = 0;
     let activeCount = 0;
     let selectiveCount = 0;
     let constantCount = 0;
+    let vectorizedCount = 0;
     let readyCount = 0;
     let selectiveReadyCount = 0;
     let constantReadyCount = 0;
+    let vectorizedReadyCount = 0;
     for (const entry of entries) {
         const cached = cache.get(String(entry.uid));
         const isReady = cached?.hash === hashText(entry.content);
@@ -1591,6 +1618,13 @@ function renderTokenSummary(book, data) {
                 constantReadyCount++;
             }
         }
+        if (!entry.disable && entry.vectorized) {
+            vectorizedCount++;
+            if (isReady) {
+                vectorized += cached.count;
+                vectorizedReadyCount++;
+            }
+        }
     }
 
     totalElement.textContent = readyCount === entries.length
@@ -1608,7 +1642,12 @@ function renderTokenSummary(book, data) {
         : constantReadyCount
             ? `${constant.toLocaleString()} 토큰 · 계산 중…`
             : (constantCount ? '계산 중…' : '0 토큰');
-    countElement.textContent = `${entries.length}개 · 활성 ${activeCount}개 · 선택 ${selectiveCount}개 · 상시 ${constantCount}개`;
+    vectorizedElement.textContent = vectorizedReadyCount === vectorizedCount
+        ? `${vectorized.toLocaleString()} 토큰`
+        : vectorizedReadyCount
+            ? `${vectorized.toLocaleString()} 토큰 · 계산 중…`
+            : (vectorizedCount ? '계산 중…' : '0 토큰');
+    countElement.textContent = `${entries.length}개 · 활성 ${activeCount}개 · 선택 ${selectiveCount}개 · 상시 ${constantCount}개 · 벡터 ${vectorizedCount}개`;
 }
 
 function queueTokenSummaryRender(book, data) {
@@ -1620,10 +1659,12 @@ function setTokenSummaryPending() {
     const totalElement = document.getElementById('slb-total-tokens');
     const selectiveElement = document.getElementById('slb-selective-tokens');
     const constantElement = document.getElementById('slb-constant-tokens');
+    const vectorizedElement = document.getElementById('slb-vectorized-tokens');
     const countElement = document.getElementById('slb-entry-count');
     if (totalElement) totalElement.textContent = '계산 중…';
     if (selectiveElement) selectiveElement.textContent = '계산 중…';
     if (constantElement) constantElement.textContent = '계산 중…';
+    if (vectorizedElement) vectorizedElement.textContent = '계산 중…';
     if (countElement) countElement.textContent = '—';
 }
 
@@ -1737,8 +1778,9 @@ async function refreshTokenSummary(forcedData = null) {
     const totalElement = document.getElementById('slb-total-tokens');
     const selectiveElement = document.getElementById('slb-selective-tokens');
     const constantElement = document.getElementById('slb-constant-tokens');
+    const vectorizedElement = document.getElementById('slb-vectorized-tokens');
     const countElement = document.getElementById('slb-entry-count');
-    if (!totalElement || !selectiveElement || !constantElement || !countElement) return;
+    if (!totalElement || !selectiveElement || !constantElement || !vectorizedElement || !countElement) return;
 
     if (!book) {
         state.currentBookData = null;
@@ -1747,6 +1789,7 @@ async function refreshTokenSummary(forcedData = null) {
         totalElement.textContent = '—';
         selectiveElement.textContent = '—';
         constantElement.textContent = '—';
+        vectorizedElement.textContent = '—';
         countElement.textContent = '—';
         return;
     }
@@ -1784,6 +1827,7 @@ async function refreshTokenSummary(forcedData = null) {
         totalElement.textContent = '계산 실패';
         selectiveElement.textContent = '계산 실패';
         constantElement.textContent = '계산 실패';
+        vectorizedElement.textContent = '계산 실패';
     } finally {
         if (state.tokenRefreshRunId === runId) state.tokenRefreshRunId = 0;
         state.pendingBookSwitch = '';
@@ -1805,6 +1849,7 @@ function enhanceAll() {
         enhanceEntryHeader(entry);
         enhanceEntry(entry);
     });
+    syncResponsiveEntryLayouts();
     syncFilterButtons();
     syncAutoControls();
 
@@ -1868,6 +1913,13 @@ function init() {
     createAIBar();
     createWorkspace();
     bindEvents();
+    state.responsiveMedia = window.matchMedia('(max-width: 760px)');
+    const responsiveListener = () => syncResponsiveEntryLayouts();
+    if (typeof state.responsiveMedia.addEventListener === 'function') {
+        state.responsiveMedia.addEventListener('change', responsiveListener);
+    } else if (typeof state.responsiveMedia.addListener === 'function') {
+        state.responsiveMedia.addListener(responsiveListener);
+    }
     scheduleEnhance();
     scheduleTokenSummary();
     state.liveSyncTimer = setInterval(syncLiveEditorTokens, 180);

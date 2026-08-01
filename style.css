@@ -972,6 +972,10 @@
     border-bottom: 1px solid var(--slb-border);
 }
 
+#WorldInfo.slb-active .world_entry .slb-activation-overview[hidden] {
+    display: none !important;
+}
+
 #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field {
     display: grid !important;
     grid-template-rows: 22px 32px;
@@ -994,5 +998,108 @@
 
     #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field {
         grid-column: 1 / -1;
+    }
+}
+
+/* v1.3.5 — desktop column header / compact mobile title row */
+#slb-ai-tools .slb-prompt-field {
+    display: flex !important;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 8px !important;
+    margin-bottom: 0 !important;
+}
+
+#slb-ai-tools .slb-prompt-field > textarea {
+    display: block;
+    margin: 0 !important;
+}
+
+#slb-ai-tools .slb-prompt-field > .slb-prompt-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    width: 100%;
+    margin: 2px 0 0 !important;
+    padding: 0 !important;
+    line-height: 1.3;
+}
+
+#slb-ai-tools .slb-ai-options {
+    margin: 0 !important;
+}
+
+@media (min-width: 761px) {
+    #WorldInfo.slb-active .world_entry .slb-header-grid {
+        display: grid !important;
+        grid-template-columns: minmax(180px, 1fr) minmax(56px, 82px) minmax(120px, 155px) minmax(56px, 64px) minmax(56px, 64px) minmax(72px, 90px);
+        grid-template-rows: 22px 32px;
+        gap: 0 8px;
+        align-items: stretch;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-grid .slb-header-label {
+        align-self: stretch;
+        justify-self: stretch;
+        justify-content: center;
+        text-align: center !important;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-grid .slb-header-field > textarea,
+    #WorldInfo.slb-active .world_entry .slb-header-grid .slb-header-field > select,
+    #WorldInfo.slb-active .world_entry .slb-header-grid .slb-header-field > input {
+        align-self: stretch;
+        width: 100% !important;
+    }
+}
+
+@media (max-width: 760px) {
+    #WorldInfo.slb-active .world_entry .slb-entry-header-shell {
+        display: grid !important;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 6px;
+        align-items: center;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-toggles {
+        grid-column: 1;
+        grid-row: 1;
+        align-self: center;
+        padding: 0;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-title-only {
+        display: block !important;
+        grid-column: 2;
+        grid-row: 1;
+        width: 100%;
+        min-width: 0;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-title-only .slb-title-field {
+        display: block !important;
+        width: 100%;
+        min-width: 0;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-title-only .slb-title-field > .slb-header-label {
+        display: none !important;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-title-only .slb-title-field > textarea {
+        display: block !important;
+        width: 100% !important;
+        height: 32px !important;
+        min-height: 32px !important;
+        max-height: 32px !important;
+        margin: 0 !important;
+        overflow: hidden;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-actions {
+        grid-column: 3;
+        grid-row: 1;
+        align-self: center;
+        padding: 0;
     }
 }
