@@ -9,12 +9,28 @@
     order: 0;
 }
 
+#slb-ai-tools,
+#slb-ai-tools > .inline-drawer {
+    box-sizing: border-box;
+    flex: 0 0 auto !important;
+    width: 100%;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+}
+
 #slb-ai-tools .inline-drawer-content {
     order: 1;
     display: flex;
+    flex: 0 0 auto !important;
     flex-direction: column;
+    align-content: flex-start;
     gap: 8px;
-    margin: 8px 0 10px;
+    box-sizing: border-box;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 8px 0 2px;
     padding: 10px;
     border: 1px solid var(--slb-border);
     border-radius: 10px;
@@ -59,6 +75,13 @@
     flex-direction: column;
     gap: 3px;
     min-width: 0;
+}
+
+#slb-ai-tools .slb-prompt-field {
+    flex: 0 0 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
 }
 
 #slb-ai-tools .slb-profile-field {
@@ -466,11 +489,33 @@
 }
 
 #WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-filter-grid {
-    margin-bottom: 6px !important;
+    flex: 0 0 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    align-content: start !important;
+    margin-bottom: 0 !important;
 }
 
 #WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-filter-grid + .inline-drawer {
     margin-top: 0 !important;
+}
+
+#WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-matching-sources {
+    box-sizing: border-box;
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-self: start !important;
+    justify-content: flex-start !important;
+}
+
+#WorldInfo.slb-active .slb-matching-sources > .inline-drawer-toggle {
+    margin: 0 0 5px !important;
 }
 
 #WorldInfo.slb-active .slb-group-grid {
@@ -882,7 +927,7 @@
 
 /* v1.3.0 */
 .slb-extension-settings {
-    margin-bottom: 10px;
+    margin-bottom: 0 !important;
 }
 
 #slb-ai-tools .slb-provider-field {
@@ -1091,15 +1136,25 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px !important;
         width: 100% !important;
+        height: max-content !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        align-content: start !important;
+        align-self: start !important;
         align-items: stretch;
     }
 
     #WorldInfo.slb-active .slb-filter-grid > .slb-filter-column {
         display: grid !important;
-        grid-template-rows: 52px 116px;
+        grid-template-rows: 52px auto;
+        flex: 0 0 auto !important;
         min-width: 0 !important;
         width: 100% !important;
+        height: max-content !important;
+        min-height: 0 !important;
+        max-height: none !important;
         margin: 0 !important;
+        align-content: start !important;
         align-items: stretch;
     }
 
@@ -1107,7 +1162,8 @@
         box-sizing: border-box;
         min-height: 52px;
         margin: 0 !important;
-        align-items: end !important;
+        align-content: start !important;
+        align-items: flex-start !important;
     }
 
     #WorldInfo.slb-active .slb-filter-grid .range-block-range,
@@ -1115,23 +1171,39 @@
         box-sizing: border-box;
         width: 100% !important;
         min-width: 0 !important;
-        height: 116px !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
         margin: 0 !important;
     }
 
     #WorldInfo.slb-active .slb-filter-grid .select2-selection--multiple {
         box-sizing: border-box;
-        height: 116px !important;
-        min-height: 116px !important;
-        max-height: 116px !important;
-        overflow-y: auto;
+        height: auto !important;
+        min-height: 32px !important;
+        max-height: none !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid select[name="characterFilter"],
+    #WorldInfo.slb-active .slb-filter-grid select[name="triggers"] {
+        box-sizing: border-box;
+        width: 100% !important;
+        min-width: 0 !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        margin: 0 !important;
     }
 }
 
 /* v1.3.5 — desktop column header / compact mobile title row */
 #slb-ai-tools .slb-prompt-field {
     display: flex !important;
+    flex: 0 0 auto !important;
     flex-direction: column;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
     gap: 3px;
     margin-top: 8px !important;
     margin-bottom: 0 !important;

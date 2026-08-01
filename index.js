@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.7';
+const VERSION = '1.3.8';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -1404,7 +1404,10 @@ function enhanceEntry(entry) {
         Array.from(filterRow.children).forEach(column => column.classList.add('slb-filter-column'));
         panels.filter.append(filterRow);
     }
-    if (matchingSources) panels.filter.append(matchingSources);
+    if (matchingSources) {
+        matchingSources.classList.add('slb-matching-sources');
+        panels.filter.append(matchingSources);
+    }
     if (bottomControls) panels.filter.append(bottomControls);
 
     const assigned = new Set([activationContainer, groupRow, filterRow, bottomControls, matchingSources].filter(Boolean));
