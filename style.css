@@ -303,6 +303,59 @@
     justify-content: center;
 }
 
+/* Desktop uses one shared title row and one shared control row. Because every
+   label occupies the exact same grid row, Title/Memo and the localized native
+   labels cannot drift vertically from one another. */
+@media (min-width: 761px) {
+    #WorldInfo.slb-active .world_entry .slb-header-grid {
+        grid-template-rows: 22px 32px;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-field {
+        display: contents !important;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-title-field > .slb-header-label,
+    #WorldInfo.slb-active .world_entry .slb-title-field > textarea {
+        grid-column: 1;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-strategy-field > .slb-header-label,
+    #WorldInfo.slb-active .world_entry .slb-strategy-field > select {
+        grid-column: 2;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-position-field > .slb-header-label,
+    #WorldInfo.slb-active .world_entry .slb-position-field > select {
+        grid-column: 3;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-depth-field > .slb-header-label,
+    #WorldInfo.slb-active .world_entry .slb-depth-field > input {
+        grid-column: 4;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-order-field > .slb-header-label,
+    #WorldInfo.slb-active .world_entry .slb-order-field > input {
+        grid-column: 5;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-trigger-field > .slb-header-label,
+    #WorldInfo.slb-active .world_entry .slb-trigger-field > input {
+        grid-column: 6;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-label {
+        grid-row: 1;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-field > textarea,
+    #WorldInfo.slb-active .world_entry .slb-header-field > select,
+    #WorldInfo.slb-active .world_entry .slb-header-field > input {
+        grid-row: 2;
+    }
+}
+
 #WorldInfo.slb-active .world_entry.slb-selected > .world_entry_form {
     border-color: var(--slb-border);
 }

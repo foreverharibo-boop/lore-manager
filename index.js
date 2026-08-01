@@ -10,7 +10,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.1.4';
+const VERSION = '1.1.5';
 const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry';
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
@@ -31,8 +31,11 @@ const state = {
     tokenTimer: null,
     tokenRenderTimer: null,
     tokenRunId: 0,
+    tokenRefreshRunId: 0,
     tokenCache: new Map(),
     entryTokenTimers: new Map(),
+    liveActiveStates: new Map(),
+    liveSyncTimer: null,
     navigatorDirty: true,
     navigatorSignature: '',
     sourceTimers: new Map(),
@@ -1232,13 +1235,14 @@ function scheduleEntryTokenCount(book, uid, content) {
         renderTokenSummary(book, data);
     }
     clearTimeout(state.entryTokenTimers.get(timerKey));
-    state.entryTokenTimers.set(timerKey, setTimeout(async () => {
-        if (book !== currentBookName()) return;
-        const latestData = state.currentBookData;
-        const latestSource = latestData?.entries?.[uid] ?? latestData?.entries?.[Number(uid)];
-        if (!latestSource || latestSource.content !== content) return;
-        const contentHash = hashText(content);
+    let timer = null;
+    timer = setTimeout(async () => {
         try {
+            if (book !== currentBookName()) return;
+            const latestData = state.currentBookData;
+            const latestSource = latestData?.entries?.[uid] ?? latestData?.entries?.[Number(uid)];
+            if (!latestSource || latestSource.content !== content) return;
+            const contentHash = hashText(content);
             const count = Number(await getTokenCountAsync(content)) || 0;
             const latestEntry = state.currentBookData?.entries?.[uid]
                 ?? state.currentBookData?.entries?.[Number(uid)];
@@ -1247,8 +1251,53 @@ function scheduleEntryTokenCount(book, uid, content) {
             renderTokenSummary(book, state.currentBookData);
         } catch (error) {
             console.warn('[로어북 매니저] Failed to count entry tokens', error);
+        } finally {
+            if (state.entryTokenTimers.get(timerKey) === timer) state.entryTokenTimers.delete(timerKey);
         }
-    }, 80));
+    }, 80);
+    state.entryTokenTimers.set(timerKey, timer);
+}
+
+function syncLiveEditorTokens() {
+    const book = currentBookName();
+    const data = state.currentBookData;
+    if (!book || !data?.entries) return;
+
+    let activeChanged = false;
+    const cache = getBookTokenCache(book);
+    for (const entryElement of renderedEntries()) {
+        const uid = getUid(entryElement);
+        const dataEntry = data.entries?.[uid] ?? data.entries?.[Number(uid)];
+        if (!dataEntry) continue;
+
+        const killSwitch = entryElement.querySelector('[name="entryKillSwitch"]');
+        if (killSwitch) {
+            const disabled = killSwitch.classList.contains('fa-toggle-off');
+            const stateKey = `${book}:${uid}`;
+            const previous = state.liveActiveStates.get(stateKey);
+            state.liveActiveStates.set(stateKey, disabled);
+            if (dataEntry.disable !== disabled) {
+                dataEntry.disable = disabled;
+                activeChanged = true;
+            } else if (previous !== undefined && previous !== disabled) {
+                activeChanged = true;
+            }
+        }
+
+        const source = entryElement.querySelector('textarea[name="content"]');
+        if (!source) continue;
+        const sourceHash = hashText(source.value);
+        const timerKey = `${book}:${uid}`;
+        if (
+            cache.get(String(uid))?.hash !== sourceHash
+            && !state.entryTokenTimers.has(timerKey)
+            && !state.tokenRefreshRunId
+        ) {
+            scheduleEntryTokenCount(book, uid, source.value);
+        }
+    }
+
+    if (activeChanged) renderTokenSummary(book, data);
 }
 
 async function refreshTokenSummary(forcedData = null) {
@@ -1284,6 +1333,7 @@ async function refreshTokenSummary(forcedData = null) {
         renderTokenSummary(book, data);
         renderedEntries().forEach(entry => updateNavigatorEntry(getUid(entry)));
 
+        state.tokenRefreshRunId = runId;
         await mapLimit(staleEntries, 4, async entry => {
             const contentHash = hashText(entry.content);
             const count = Number(await getTokenCountAsync(entry.content)) || 0;
@@ -1299,6 +1349,8 @@ async function refreshTokenSummary(forcedData = null) {
         console.warn('[로어북 매니저] Failed to count tokens', error);
         totalElement.textContent = '계산 실패';
         activeElement.textContent = '계산 실패';
+    } finally {
+        if (state.tokenRefreshRunId === runId) state.tokenRefreshRunId = 0;
     }
 }
 
@@ -1338,6 +1390,7 @@ function bindEvents() {
         state.currentBookData = null;
         state.navigatorDirty = true;
         state.tokenRunId++;
+        state.liveActiveStates.clear();
         setTokenSummaryPending();
         scheduleEnhance();
         scheduleTokenSummary(null, 80);
@@ -1375,6 +1428,7 @@ function init() {
     bindEvents();
     scheduleEnhance();
     scheduleTokenSummary();
+    state.liveSyncTimer = setInterval(syncLiveEditorTokens, 180);
     console.info(`[로어북 매니저] v${VERSION} initialized`);
 }
 
