@@ -10,7 +10,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.1.1';
+const VERSION = '1.1.2';
 const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry';
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
@@ -29,6 +29,12 @@ const state = {
     observer: null,
     refreshTimer: null,
     tokenTimer: null,
+    tokenRenderTimer: null,
+    tokenRunId: 0,
+    tokenCache: new Map(),
+    entryTokenTimers: new Map(),
+    navigatorDirty: true,
+    navigatorSignature: '',
     sourceTimers: new Map(),
     translationTimers: new Map(),
 };
@@ -492,7 +498,30 @@ function createWorkspace() {
     });
 
     entries.addEventListener('input', event => {
-        if (event.target.matches('textarea[name="comment"]')) scheduleEnhance();
+        const entry = event.target.closest('.world_entry');
+        if (!entry) return;
+        const uid = getUid(entry);
+        if (event.target.matches('textarea[name="comment"], select[name="entryStateSelector"]')) {
+            updateNavigatorEntry(uid);
+        }
+        if (event.target.matches('textarea[name="content"]')) {
+            scheduleEntryTokenCount(currentBookName(), uid, event.target.value);
+        }
+    });
+
+    entries.addEventListener('click', event => {
+        const killSwitch = event.target.closest('[name="entryKillSwitch"]');
+        if (!killSwitch) return;
+        const entry = killSwitch.closest('.world_entry');
+        const uid = getUid(entry);
+        // SillyTavern changes its data and classes synchronously in the target
+        // click handler. Read that new state after the event reaches us.
+        queueMicrotask(() => {
+            const data = entryData(uid);
+            if (data) data.disable = killSwitch.classList.contains('fa-toggle-off');
+            updateNavigatorEntry(uid);
+            renderTokenSummary(currentBookName(), state.currentBookData);
+        });
     });
 
     document.getElementById('OpenAllWIEntries')?.addEventListener('click', () => {
@@ -504,7 +533,21 @@ function createWorkspace() {
         scheduleEnhance();
     });
 
-    state.observer = new MutationObserver(() => scheduleEnhance());
+    state.observer = new MutationObserver(mutations => {
+        let listChanged = false;
+        let entryChanged = false;
+        for (const mutation of mutations) {
+            if (mutation.target === entries) listChanged = true;
+            for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+                if (!(node instanceof Element)) continue;
+                if (node.matches('.world_entry, .world_entry_edit, #WIEntryHeaderTitlesPC') || node.querySelector('.world_entry, .world_entry_edit')) {
+                    entryChanged = true;
+                }
+            }
+        }
+        if (listChanged) state.navigatorDirty = true;
+        if (listChanged || entryChanged) scheduleEnhance();
+    });
     state.observer.observe(entries, { childList: true, subtree: true });
 }
 
@@ -512,17 +555,39 @@ function renderedEntries() {
     return Array.from(document.querySelectorAll(ENTRY_SELECTOR));
 }
 
-function enhanceEntryHeader(entry) {
-    if (!entry || entry.dataset.slbHeaderEnhanced === VERSION) return;
+function hideNativeHeaderRows() {
+    document.querySelectorAll('#WIEntryHeaderTitlesPC').forEach(row => {
+        row.hidden = true;
+        row.classList.add('slb-native-column-header');
+    });
+}
 
+function syncEntryHeaderActions(entry) {
+    const header = entry?.querySelector('.inline-drawer-header.slb-entry-header');
+    const actions = header?.querySelector('.slb-header-actions');
+    if (!header || !actions) return;
+    const orphanActions = Array.from(header.children).filter(child => (
+        child !== actions
+        && child.classList?.contains('menu_button')
+    ));
+    actions.append(...orphanActions);
+}
+
+function enhanceEntryHeader(entry) {
+    if (!entry) return;
+    if (entry.dataset.slbHeaderEnhanced === VERSION) {
+        syncEntryHeaderActions(entry);
+        return;
+    }
+
+    const header = entry.querySelector('.inline-drawer-header');
+    const thinControls = header?.querySelector(':scope > .world_entry_thin_controls');
     const titleAndStatus = entry.querySelector('.WIEntryTitleAndStatus');
     const titleField = titleAndStatus?.querySelector(':scope > .flex-container.flex1');
     const stateSelect = titleAndStatus?.querySelector(':scope > select[name="entryStateSelector"]');
     const controls = entry.querySelector('.WIEnteryHeaderControls');
-    if (!titleAndStatus || !titleField || !stateSelect || !controls) return;
+    if (!header || !thinControls || !titleAndStatus || !titleField || !stateSelect || !controls) return;
 
-    titleAndStatus.classList.add('slb-native-header-main');
-    controls.classList.add('slb-native-header-controls');
     titleField.classList.add('slb-header-field', 'slb-title-field');
     titleField.prepend(createElement('small', 'slb-header-label', 'Title/Memo'));
 
@@ -545,6 +610,32 @@ function enhanceEntryHeader(entry) {
         field.querySelector(':scope > .WIEntryHeaderTitleMobile')?.classList.add('slb-header-label');
     }
 
+    const shell = createElement('div', 'slb-entry-header-shell');
+    const toggles = createElement('div', 'slb-header-toggles');
+    const fields = createElement('div', 'slb-header-grid');
+    const actions = createElement('div', 'slb-header-actions');
+    const dragHandle = header.querySelector(':scope > .drag-handle');
+    const drawerToggle = thinControls.querySelector(':scope > .inline-drawer-toggle');
+    const killSwitch = thinControls.querySelector(':scope > [name="entryKillSwitch"]');
+    toggles.append(...[dragHandle, drawerToggle, killSwitch].filter(Boolean));
+
+    const orderedFields = [
+        titleField,
+        strategyField,
+        entry.querySelector('.slb-position-field'),
+        entry.querySelector('.slb-depth-field'),
+        entry.querySelector('.slb-order-field'),
+        entry.querySelector('.slb-trigger-field'),
+    ].filter(Boolean);
+    fields.append(...orderedFields);
+
+    const nativeActions = Array.from(header.children).filter(child => child.classList?.contains('menu_button'));
+    actions.append(...nativeActions);
+    shell.append(toggles, fields, actions);
+    header.classList.add('slb-entry-header');
+    header.append(shell);
+    thinControls.remove();
+
     entry.dataset.slbHeaderEnhanced = VERSION;
 }
 
@@ -560,6 +651,31 @@ function entryLabel(entry) {
     const comment = entry.querySelector('textarea[name="comment"]')?.value?.trim();
     const firstKey = Array.isArray(data?.key) ? data.key[0] : '';
     return comment || data?.comment || firstKey || `항목 #${uid}`;
+}
+
+function getNavigatorSignature(entries = renderedEntries()) {
+    return entries.map(entry => getUid(entry)).join('|');
+}
+
+function updateNavigatorEntry(uid) {
+    const entry = renderedEntries().find(item => getUid(item) === String(uid));
+    if (!entry) return;
+    const data = entryData(uid);
+    const label = entryLabel(entry);
+    const stateSelector = entry.querySelector('select[name="entryStateSelector"]');
+    const stateIcon = stateSelector?.selectedOptions?.[0]?.textContent?.trim() || '🟢';
+    const button = Array.from(document.querySelectorAll('.slb-nav-item'))
+        .find(item => item.dataset.uid === String(uid));
+    if (button) {
+        button.classList.toggle('is-disabled', Boolean(data?.disable));
+        const labelElement = button.querySelector('.slb-nav-label');
+        const iconElement = button.querySelector('small');
+        if (labelElement) labelElement.textContent = label;
+        if (iconElement) iconElement.textContent = stateIcon;
+    }
+    const mobile = document.getElementById('slb-mobile-select');
+    const option = Array.from(mobile?.options ?? []).find(item => item.value === String(uid));
+    if (option) option.textContent = `${stateIcon} ${label}`;
 }
 
 function selectEntry(uid, open = false) {
@@ -591,6 +707,8 @@ function rebuildNavigator() {
     if (!list || !mobile) return;
 
     const entries = renderedEntries();
+    state.navigatorSignature = getNavigatorSignature(entries);
+    state.navigatorDirty = false;
     list.replaceChildren();
     mobile.replaceChildren();
     document.getElementById('slb-page-count').textContent = `${entries.length}개`;
@@ -643,7 +761,7 @@ function scheduleTranslationReflection(ui) {
     state.translationTimers.set(key, setTimeout(() => reflectEntryTranslation(ui), 1400));
 }
 
-async function translateEntrySource(ui, force = false) {
+async function translateEntrySource(ui, force = false, background = false) {
     if (ui.flags.writingSource || ui.flags.translating) return;
     const settings = getSettings();
     const source = ui.source.value;
@@ -658,7 +776,12 @@ async function translateEntrySource(ui, force = false) {
     }
 
     ui.flags.translating = true;
-    setEntryBusy(ui, true, '원문을 번역하는 중…');
+    if (background) {
+        ui.translationPane.classList.add('slb-pane-busy');
+        ui.status.textContent = '번역본이 없어 백그라운드에서 번역하는 중…';
+    } else {
+        setEntryBusy(ui, true, '원문을 번역하는 중…');
+    }
     try {
         const translated = await translateText(source);
         if (ui.source.value !== source) {
@@ -675,7 +798,8 @@ async function translateEntrySource(ui, force = false) {
         notify(ui.status.textContent, 'error');
     } finally {
         ui.flags.translating = false;
-        setEntryBusy(ui, false);
+        ui.translationPane.classList.remove('slb-pane-busy');
+        if (!background) setEntryBusy(ui, false);
     }
 }
 
@@ -873,7 +997,13 @@ function enhanceEntry(entry) {
     panels.activation.append(keywordAssistant);
     if (activationContainer && activationContainer.isConnected) panels.activation.append(activationContainer);
 
-    if (groupRow) panels.group.append(groupRow);
+    if (groupRow) {
+        groupRow.classList.add('slb-group-grid');
+        Array.from(groupRow.children).forEach((field, index) => {
+            field.classList.add('slb-group-field', `slb-group-field-${index + 1}`);
+        });
+        panels.group.append(groupRow);
+    }
     if (filterRow) panels.filter.append(filterRow);
     if (bottomControls) panels.filter.append(bottomControls);
     if (matchingSources) panels.filter.append(matchingSources);
@@ -909,6 +1039,7 @@ function enhanceEntry(entry) {
         uid,
         source,
         translation,
+        translationPane,
         status: syncStatus,
         autoSync,
         applyButton,
@@ -995,7 +1126,7 @@ function enhanceEntry(entry) {
 
     const hasTranslation = record?.language === settings.language && Boolean(record.text?.trim());
     if (!hasTranslation && settings.translateMissingOnOpen && settings.profileId) {
-        setTimeout(() => translateEntrySource(ui, true), 300);
+        setTimeout(() => translateEntrySource(ui, true, true), 350);
     }
 }
 
@@ -1012,8 +1143,100 @@ async function mapLimit(items, limit, mapper) {
     return results;
 }
 
+function lorebookEntries(data) {
+    return Object.values(data?.entries ?? {}).filter(entry => entry && typeof entry.content === 'string');
+}
+
+function getBookTokenCache(book) {
+    if (!state.tokenCache.has(book)) state.tokenCache.set(book, new Map());
+    return state.tokenCache.get(book);
+}
+
+function renderTokenSummary(book, data) {
+    if (!book || book !== currentBookName() || !data?.entries) return;
+    const totalElement = document.getElementById('slb-total-tokens');
+    const activeElement = document.getElementById('slb-active-tokens');
+    const countElement = document.getElementById('slb-entry-count');
+    if (!totalElement || !activeElement || !countElement) return;
+
+    const entries = lorebookEntries(data);
+    const cache = getBookTokenCache(book);
+    let total = 0;
+    let active = 0;
+    let activeCount = 0;
+    let readyCount = 0;
+    let activeReadyCount = 0;
+    for (const entry of entries) {
+        const cached = cache.get(String(entry.uid));
+        const isReady = cached?.hash === hashText(entry.content);
+        if (isReady) {
+            total += cached.count;
+            readyCount++;
+        }
+        if (!entry.disable) {
+            activeCount++;
+            if (isReady) {
+                active += cached.count;
+                activeReadyCount++;
+            }
+        }
+    }
+
+    totalElement.textContent = readyCount === entries.length
+        ? `${total.toLocaleString()} 토큰`
+        : readyCount
+            ? `${total.toLocaleString()} 토큰 · 계산 중…`
+            : '계산 중…';
+    activeElement.textContent = activeReadyCount === activeCount
+        ? `${active.toLocaleString()} 토큰`
+        : activeReadyCount
+            ? `${active.toLocaleString()} 토큰 · 계산 중…`
+            : '계산 중…';
+    countElement.textContent = `${entries.length}개 · 활성 ${activeCount}개`;
+}
+
+function queueTokenSummaryRender(book, data) {
+    clearTimeout(state.tokenRenderTimer);
+    state.tokenRenderTimer = setTimeout(() => renderTokenSummary(book, data), 16);
+}
+
+function setTokenSummaryPending() {
+    const totalElement = document.getElementById('slb-total-tokens');
+    const activeElement = document.getElementById('slb-active-tokens');
+    const countElement = document.getElementById('slb-entry-count');
+    if (totalElement) totalElement.textContent = '계산 중…';
+    if (activeElement) activeElement.textContent = '계산 중…';
+    if (countElement) countElement.textContent = '—';
+}
+
+function scheduleEntryTokenCount(book, uid, content) {
+    if (!book || !uid) return;
+    const timerKey = `${book}:${uid}`;
+    clearTimeout(state.entryTokenTimers.get(timerKey));
+    state.entryTokenTimers.set(timerKey, setTimeout(async () => {
+        if (book !== currentBookName()) return;
+        const data = state.currentBookData;
+        const entry = data?.entries?.[uid] ?? data?.entries?.[Number(uid)];
+        if (!entry) return;
+        entry.content = content;
+        const contentHash = hashText(content);
+        renderTokenSummary(book, data);
+        try {
+            const count = Number(await getTokenCountAsync(content)) || 0;
+            const latestEntry = state.currentBookData?.entries?.[uid]
+                ?? state.currentBookData?.entries?.[Number(uid)];
+            if (book !== currentBookName() || !latestEntry || hashText(latestEntry.content) !== contentHash) return;
+            getBookTokenCache(book).set(String(uid), { hash: contentHash, count });
+            renderTokenSummary(book, state.currentBookData);
+        } catch (error) {
+            console.warn('[로어북 매니저] Failed to count entry tokens', error);
+        }
+    }, 220));
+}
+
 async function refreshTokenSummary(forcedData = null) {
     const book = currentBookName();
+    const runId = ++state.tokenRunId;
     const totalElement = document.getElementById('slb-total-tokens');
     const activeElement = document.getElementById('slb-active-tokens');
     const countElement = document.getElementById('slb-entry-count');
@@ -1033,24 +1256,28 @@ async function refreshTokenSummary(forcedData = null) {
         if (!data?.entries) return;
         state.currentBook = book;
         state.currentBookData = data;
-        const entries = Object.values(data.entries).filter(entry => entry && typeof entry.content === 'string');
-        const counts = await mapLimit(entries, 4, entry => getTokenCountAsync(entry.content));
-        if (currentBookName() !== book) return;
-        let total = 0;
-        let active = 0;
-        let activeCount = 0;
-        entries.forEach((entry, index) => {
-            const count = Number(counts[index]) || 0;
-            total += count;
-            if (!entry.disable) {
-                active += count;
-                activeCount++;
+        const entries = lorebookEntries(data);
+        const cache = getBookTokenCache(book);
+        const liveUids = new Set(entries.map(entry => String(entry.uid)));
+        for (const uid of cache.keys()) {
+            if (!liveUids.has(uid)) cache.delete(uid);
+        }
+
+        const staleEntries = entries.filter(entry => cache.get(String(entry.uid))?.hash !== hashText(entry.content));
+        renderTokenSummary(book, data);
+        renderedEntries().forEach(entry => updateNavigatorEntry(getUid(entry)));
+
+        await mapLimit(staleEntries, 4, async entry => {
+            const contentHash = hashText(entry.content);
+            const count = Number(await getTokenCountAsync(entry.content)) || 0;
+            const latest = data.entries?.[entry.uid] ?? data.entries?.[Number(entry.uid)];
+            if (latest && hashText(latest.content) === contentHash) {
+                cache.set(String(entry.uid), { hash: contentHash, count });
+                if (runId === state.tokenRunId) queueTokenSummaryRender(book, data);
             }
         });
-        totalElement.textContent = `${total.toLocaleString()} 토큰`;
-        activeElement.textContent = `${active.toLocaleString()} 토큰`;
-        countElement.textContent = `${entries.length}개 · 활성 ${activeCount}개`;
-        rebuildNavigator();
+        if (currentBookName() !== book || runId !== state.tokenRunId) return;
+        renderTokenSummary(book, data);
     } catch (error) {
         console.warn('[로어북 매니저] Failed to count tokens', error);
         totalElement.textContent = '계산 실패';
@@ -1066,12 +1293,14 @@ function scheduleTokenSummary(data = null, delay = 500) {
 function enhanceAll() {
     createAIBar();
     createWorkspace();
-    rebuildNavigator();
+    hideNativeHeaderRows();
     const entries = renderedEntries();
     entries.forEach(entry => {
         enhanceEntryHeader(entry);
         enhanceEntry(entry);
     });
+    const signature = getNavigatorSignature(entries);
+    if (state.navigatorDirty || state.navigatorSignature !== signature) rebuildNavigator();
     syncAutoControls();
 
     // The editor can render its selected lorebook after this extension's first
@@ -1090,19 +1319,23 @@ function bindEvents() {
     document.getElementById('world_editor_select')?.addEventListener('change', () => {
         state.selectedUid = '';
         state.currentBookData = null;
+        state.navigatorDirty = true;
+        state.tokenRunId++;
+        setTokenSummaryPending();
         scheduleEnhance();
-        scheduleTokenSummary();
+        scheduleTokenSummary(null, 80);
     });
     document.getElementById('world_refresh')?.addEventListener('click', () => scheduleTokenSummary());
     document.getElementById('world_popup_new')?.addEventListener('click', () => {
         state.selectedUid = '';
+        state.navigatorDirty = true;
         scheduleEnhance();
-        scheduleTokenSummary();
+        scheduleTokenSummary(null, 120);
     });
 
     if (event_types.WORLDINFO_UPDATED) {
         eventSource.on(event_types.WORLDINFO_UPDATED, (name, data) => {
-            if (name === currentBookName()) scheduleTokenSummary(data);
+            if (name === currentBookName()) scheduleTokenSummary(data, 80);
         });
     }
     for (const eventName of ['CONNECTION_PROFILE_CREATED', 'CONNECTION_PROFILE_UPDATED', 'CONNECTION_PROFILE_DELETED']) {

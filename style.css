@@ -73,14 +73,16 @@
 
 #WorldInfo.slb-active #slb-test-profile {
     display: inline-flex;
+    flex-flow: row nowrap !important;
     flex: 0 0 auto;
     align-self: flex-end;
     align-items: center;
     justify-content: center;
     width: auto !important;
-    min-width: 112px;
-    white-space: nowrap;
-    word-break: keep-all;
+    min-width: 132px !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
     writing-mode: horizontal-tb !important;
 }
 
@@ -213,34 +215,51 @@
 /* The native desktop header is a single fixed-width row, so it drifts away
    from fields when the extension changes the editor width. Each field gets
    its own label instead. */
-#WorldInfo.slb-active #WIEntryHeaderTitlesPC {
+#WorldInfo.slb-active #WIEntryHeaderTitlesPC,
+#WorldInfo.slb-active #WIEntryHeaderTitlesPC.slb-native-column-header {
     display: none !important;
 }
 
-#WorldInfo.slb-active .world_entry .slb-native-header-main,
-#WorldInfo.slb-active .world_entry .slb-native-header-controls {
-    align-items: flex-end !important;
+#WorldInfo.slb-active .world_entry .slb-entry-header {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 4px 0;
+}
+
+#WorldInfo.slb-active .world_entry .slb-entry-header-shell {
+    display: grid !important;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 6px;
+    align-items: end;
+}
+
+#WorldInfo.slb-active .world_entry .slb-header-toggles,
+#WorldInfo.slb-active .world_entry .slb-header-actions {
+    display: flex;
+    flex-flow: row nowrap !important;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    padding-bottom: 1px;
+}
+
+#WorldInfo.slb-active .world_entry .slb-header-grid {
+    display: grid !important;
+    min-width: 0;
+    grid-template-columns: minmax(80px, 1fr) 48px minmax(96px, 140px) 60px 60px 68px;
     gap: 5px;
+    align-items: end;
 }
 
 #WorldInfo.slb-active .world_entry .slb-header-field {
-    display: flex;
+    display: grid !important;
     min-width: 0;
-    flex-direction: column;
-    align-items: stretch;
-    justify-content: flex-end;
-}
-
-#WorldInfo.slb-active .world_entry .slb-title-field {
-    flex: 1 1 150px;
-}
-
-#WorldInfo.slb-active .world_entry .slb-strategy-field,
-#WorldInfo.slb-active .world_entry .slb-position-field,
-#WorldInfo.slb-active .world_entry .slb-depth-field,
-#WorldInfo.slb-active .world_entry .slb-order-field,
-#WorldInfo.slb-active .world_entry .slb-trigger-field {
-    flex: 0 0 auto;
+    grid-template-rows: minmax(18px, auto) auto;
+    min-width: 0;
+    align-items: end;
 }
 
 #WorldInfo.slb-active .world_entry .slb-header-label,
@@ -250,14 +269,26 @@
     width: 100%;
     margin: 0 0 3px;
     line-height: 1.05;
-    text-align: center;
-    white-space: nowrap;
-    word-break: keep-all;
+    text-align: center !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
 }
 
-#WorldInfo.slb-active .world_entry .slb-header-field > .text_pole {
+#WorldInfo.slb-active .world_entry .slb-header-field > .text_pole,
+#WorldInfo.slb-active .world_entry .slb-header-field > textarea,
+#WorldInfo.slb-active .world_entry .slb-header-field > select,
+#WorldInfo.slb-active .world_entry .slb-header-field > input {
+    box-sizing: border-box;
+    width: 100% !important;
+    min-width: 0 !important;
     margin-top: 0 !important;
     margin-bottom: 0 !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-header-actions .menu_button,
+#WorldInfo.slb-active .world_entry .slb-header-toggles > * {
+    flex: 0 0 auto;
 }
 
 #WorldInfo.slb-active .world_entry.slb-selected > .world_entry_form {
@@ -297,6 +328,43 @@
 
 #WorldInfo.slb-active .slb-panel.is-active {
     display: block;
+}
+
+#WorldInfo.slb-active .slb-group-grid {
+    display: grid !important;
+    grid-template-columns: minmax(190px, 2fr) repeat(4, minmax(72px, 1fr));
+    gap: 8px !important;
+    align-items: stretch;
+}
+
+#WorldInfo.slb-active .slb-group-grid > .slb-group-field {
+    display: grid !important;
+    min-width: 0;
+    grid-template-rows: minmax(32px, auto) auto;
+    align-content: end;
+}
+
+#WorldInfo.slb-active .slb-group-grid > .slb-group-field > :first-child {
+    box-sizing: border-box;
+    min-height: 32px;
+    margin: 0 0 5px !important;
+    align-items: flex-end !important;
+}
+
+#WorldInfo.slb-active .slb-group-grid > .slb-group-field:not(.slb-group-field-1) > :first-child {
+    justify-content: center !important;
+    text-align: center;
+}
+
+#WorldInfo.slb-active .slb-group-grid .range-block-range,
+#WorldInfo.slb-active .slb-group-grid input[name="group"],
+#WorldInfo.slb-active .slb-group-grid input[name="groupWeight"],
+#WorldInfo.slb-active .slb-group-grid input[name="sticky"],
+#WorldInfo.slb-active .slb-group-grid input[name="cooldown"],
+#WorldInfo.slb-active .slb-group-grid input[name="delay"] {
+    box-sizing: border-box;
+    width: 100% !important;
+    min-width: 0 !important;
 }
 
 #WorldInfo.slb-active [name="contentAndCharFilterBlock"].slb-content-grid {
@@ -429,13 +497,19 @@
 #WorldInfo.slb-active .slb-keyword-actions .menu_button {
     width: auto;
     min-width: 0;
-    white-space: nowrap;
-    word-break: keep-all;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
+    writing-mode: horizontal-tb !important;
 }
 
 #WorldInfo.slb-active .slb-busy {
     opacity: 0.65;
     pointer-events: none;
+}
+
+#WorldInfo.slb-active .slb-pane-busy {
+    opacity: 0.68;
 }
 
 @media (max-width: 760px) {
@@ -463,7 +537,8 @@
 
     #WorldInfo.slb-active .slb-ai-fields {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: minmax(0, 1fr) minmax(132px, max-content);
+        gap: 8px;
         align-items: end;
     }
 
@@ -481,6 +556,100 @@
 
     #WorldInfo.slb-active #slb-test-profile {
         grid-column: 2;
+        display: inline-flex !important;
+        inline-size: max-content !important;
+        min-inline-size: 132px !important;
+        max-inline-size: none !important;
+        padding-inline: 10px !important;
+        flex-flow: row nowrap !important;
+        white-space: nowrap !important;
+        word-break: keep-all !important;
+        overflow-wrap: normal !important;
+        writing-mode: horizontal-tb !important;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-head {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 8px;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-title {
+        min-width: 0;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-head > .menu_button {
+        display: inline-flex !important;
+        inline-size: max-content !important;
+        min-inline-size: 126px !important;
+        max-inline-size: none !important;
+        flex-flow: row nowrap !important;
+        justify-content: center;
+        white-space: nowrap !important;
+        word-break: keep-all !important;
+        overflow-wrap: normal !important;
+        writing-mode: horizontal-tb !important;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-entry-header-shell {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: start;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-toggles {
+        grid-column: 1;
+        grid-row: 1;
+        align-self: start;
+        padding-top: 2px;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-actions {
+        grid-column: 3;
+        grid-row: 1;
+        align-self: start;
+        padding: 0;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-grid {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        width: 100%;
+        gap: 7px;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-title-field {
+        grid-column: 1 / -1;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-strategy-field {
+        grid-column: 1 / 3;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-position-field {
+        grid-column: 3 / 7;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-depth-field {
+        grid-column: 1 / 3;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-order-field {
+        grid-column: 3 / 5;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-trigger-field {
+        grid-column: 5 / 7;
+    }
+
+    #WorldInfo.slb-active .slb-group-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px !important;
+    }
+
+    #WorldInfo.slb-active .slb-group-grid > .slb-group-field-1 {
+        grid-column: 1 / -1;
     }
 }
 
