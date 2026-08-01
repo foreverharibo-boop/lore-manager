@@ -1,0 +1,359 @@
+#WorldInfo.slb-active {
+    --slb-border: var(--SmartThemeBorderColor, rgba(127, 127, 127, 0.35));
+    --slb-surface: var(--SmartThemeBlurTintColor, rgba(127, 127, 127, 0.08));
+    --slb-text: var(--SmartThemeBodyColor, inherit);
+    --slb-accent: var(--SmartThemeQuoteColor, var(--SmartThemeEmColor, currentColor));
+}
+
+#WorldInfo.slb-active #wiTopBlock {
+    order: 0;
+}
+
+#WorldInfo.slb-active #slb-ai-tools {
+    order: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 8px 0 10px;
+    padding: 10px;
+    border: 1px solid var(--slb-border);
+    border-radius: 10px;
+    background: var(--slb-surface);
+    color: var(--slb-text);
+}
+
+#WorldInfo.slb-active .slb-ai-title,
+#WorldInfo.slb-active .slb-ai-fields,
+#WorldInfo.slb-active .slb-ai-options,
+#WorldInfo.slb-active .slb-token-strip,
+#WorldInfo.slb-active .slb-entry-editor-head,
+#WorldInfo.slb-active .slb-sync-row,
+#WorldInfo.slb-active .slb-entry-meta,
+#WorldInfo.slb-active .slb-tabbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+#WorldInfo.slb-active .slb-ai-title {
+    justify-content: space-between;
+    font-weight: 600;
+}
+
+#WorldInfo.slb-active .slb-ai-badge,
+#WorldInfo.slb-active .slb-lang-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--slb-accent) 16%, transparent);
+    color: var(--slb-text);
+    font-size: 0.82em;
+    white-space: nowrap;
+}
+
+#WorldInfo.slb-active .slb-field {
+    display: flex;
+    flex: 1 1 180px;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+#WorldInfo.slb-active .slb-field > small {
+    opacity: 0.75;
+}
+
+#WorldInfo.slb-active .slb-ai-options label,
+#WorldInfo.slb-active .slb-sync-row label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+#WorldInfo.slb-active #slb-ai-status {
+    flex: 1 1 240px;
+    opacity: 0.75;
+}
+
+#WorldInfo.slb-active #world_popup > hr {
+    margin-top: 6px;
+}
+
+#WorldInfo.slb-active #world_popup > .flex-container {
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+#WorldInfo.slb-active #world_import_button,
+#WorldInfo.slb-active #world_popup_export {
+    flex: 0 0 auto;
+}
+
+#WorldInfo.slb-active .slb-token-strip {
+    justify-content: flex-start;
+    margin: 8px 0;
+    padding: 8px 10px;
+    border-block: 1px solid var(--slb-border);
+}
+
+#WorldInfo.slb-active .slb-token-strip strong {
+    margin-left: 3px;
+}
+
+#WorldInfo.slb-active .slb-workspace {
+    display: grid;
+    grid-template-columns: minmax(190px, 230px) minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+}
+
+#WorldInfo.slb-active .slb-navigator {
+    min-width: 0;
+    border-right: 1px solid var(--slb-border);
+    padding-right: 10px;
+}
+
+#WorldInfo.slb-active .slb-nav-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+#WorldInfo.slb-active .slb-nav-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#WorldInfo.slb-active .slb-nav-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 7px;
+    align-items: center;
+    width: 100%;
+    padding: 7px 8px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--slb-text);
+    text-align: left;
+    cursor: pointer;
+}
+
+#WorldInfo.slb-active .slb-nav-item:hover {
+    background: var(--slb-surface);
+}
+
+#WorldInfo.slb-active .slb-nav-item.is-selected {
+    border-color: var(--slb-border);
+    background: var(--slb-surface);
+}
+
+#WorldInfo.slb-active .slb-nav-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#WorldInfo.slb-active .slb-nav-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--slb-accent);
+}
+
+#WorldInfo.slb-active .slb-nav-item.is-disabled .slb-nav-dot {
+    opacity: 0.3;
+}
+
+#WorldInfo.slb-active .slb-mobile-select {
+    display: none;
+    width: 100%;
+    margin-top: 5px;
+}
+
+#WorldInfo.slb-active #world_popup_entries_list {
+    min-width: 0;
+}
+
+#WorldInfo.slb-active .slb-workspace:not(.slb-show-all) #world_popup_entries_list > .world_entry:not(.slb-selected) {
+    display: none !important;
+}
+
+#WorldInfo.slb-active #world_popup_entries_list > .world_entry {
+    margin: 0 0 8px;
+}
+
+#WorldInfo.slb-active .world_entry.slb-selected > .world_entry_form {
+    border-color: var(--slb-border);
+}
+
+#WorldInfo.slb-active .slb-tabbar {
+    margin: 4px 0 10px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--slb-border);
+}
+
+#WorldInfo.slb-active .slb-tab {
+    padding: 6px 8px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--slb-text);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+#WorldInfo.slb-active .slb-tab.is-active {
+    border-bottom-color: var(--slb-accent);
+}
+
+#WorldInfo.slb-active .slb-panel {
+    display: none;
+}
+
+#WorldInfo.slb-active .slb-panel.is-active {
+    display: block;
+}
+
+#WorldInfo.slb-active [name="contentAndCharFilterBlock"].slb-content-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    align-items: stretch;
+}
+
+#WorldInfo.slb-active .slb-source-pane,
+#WorldInfo.slb-active .slb-translation-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+#WorldInfo.slb-active .slb-native-content-label {
+    display: none;
+}
+
+#WorldInfo.slb-active .slb-entry-editor-head {
+    flex-wrap: nowrap;
+    min-height: 34px;
+    margin-bottom: 5px;
+}
+
+#WorldInfo.slb-active .slb-entry-editor-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+#WorldInfo.slb-active .slb-entry-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+#WorldInfo.slb-active .slb-entry-actions .menu_button {
+    width: auto;
+    min-width: 0;
+    padding-inline: 5px;
+    gap: 3px;
+}
+
+#WorldInfo.slb-active .slb-source-pane textarea[name="content"],
+#WorldInfo.slb-active .slb-translation-text {
+    box-sizing: border-box;
+    width: 100%;
+    height: 250px;
+    min-height: 250px;
+    resize: vertical;
+}
+
+#WorldInfo.slb-active .slb-sync-row {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--slb-border);
+}
+
+#WorldInfo.slb-active .slb-sync-status {
+    flex: 1 1 220px;
+    opacity: 0.75;
+}
+
+#WorldInfo.slb-active .slb-entry-meta {
+    margin-top: 8px;
+    padding: 7px 0;
+    border-top: 1px solid var(--slb-border);
+}
+
+#WorldInfo.slb-active .slb-entry-meta > * {
+    max-width: 100%;
+}
+
+#WorldInfo.slb-active .slb-insertion-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--slb-border);
+    border-radius: 8px;
+    background: var(--slb-surface);
+}
+
+#WorldInfo.slb-active .slb-busy {
+    opacity: 0.65;
+    pointer-events: none;
+}
+
+@media (max-width: 760px) {
+    #WorldInfo.slb-active .slb-workspace {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    #WorldInfo.slb-active .slb-navigator {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        padding: 8px 0;
+        border-right: 0;
+        border-bottom: 1px solid var(--slb-border);
+        background: var(--SmartThemeBlurTintColor, inherit);
+    }
+
+    #WorldInfo.slb-active .slb-nav-list {
+        display: none;
+    }
+
+    #WorldInfo.slb-active .slb-mobile-select {
+        display: block;
+    }
+
+    #WorldInfo.slb-active .slb-ai-fields {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 620px) {
+    #WorldInfo.slb-active [name="contentAndCharFilterBlock"].slb-content-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    #WorldInfo.slb-active .slb-tabbar {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+    }
+
+    #WorldInfo.slb-active .slb-source-pane textarea[name="content"],
+    #WorldInfo.slb-active .slb-translation-text {
+        height: 220px;
+        min-height: 220px;
+    }
+}

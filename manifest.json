@@ -1,0 +1,12 @@
+{
+  "display_name": "로어북 매니저",
+  "loading_order": 22,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "foreverharibo-boop",
+  "version": "1.0.0",
+  "homePage": "",
+  "auto_update": false
+}
