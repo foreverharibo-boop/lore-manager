@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.12';
+const VERSION = '1.3.13';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -21,11 +21,15 @@ const HEADER_LAYOUT_SAFETY_GAP = 24;
 const GOOGLE_TRANSLATE_CHUNK_LIMIT = 2200;
 const GOOGLE_TRANSLATE_CHUNK_DELAY = 350;
 const GOOGLE_TRANSLATE_RETRY_DELAYS = Object.freeze([650, 1600]);
+const DEFAULT_AI_OUTPUT_TOKENS = 8192;
+const MIN_AI_OUTPUT_TOKENS = 512;
+const MAX_AI_OUTPUT_TOKENS = 65536;
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
     language: 'Korean',
     translationProvider: 'profile',
     translationPrompt: '',
+    aiOutputTokens: DEFAULT_AI_OUTPUT_TOKENS,
     tokenScope: 'active',
     entryFilter: 'all',
     translateMissingOnOpen: true,
@@ -33,6 +37,12 @@ const DEFAULT_SETTINGS = Object.freeze({
     autoSyncToSource: true,
     translations: {},
 });
+
+function normalizeAIOutputTokens(value) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return DEFAULT_AI_OUTPUT_TOKENS;
+    return Math.min(MAX_AI_OUTPUT_TOKENS, Math.max(MIN_AI_OUTPUT_TOKENS, parsed));
+}
 
 const GOOGLE_LANGUAGE_CODES = Object.freeze({
     'Korean': 'ko',
@@ -86,6 +96,8 @@ function getSettings() {
     if (!settings.translations || typeof settings.translations !== 'object' || Array.isArray(settings.translations)) {
         settings.translations = {};
     }
+
+    settings.aiOutputTokens = normalizeAIOutputTokens(settings.aiOutputTokens);
 
     return settings;
 }
@@ -194,16 +206,18 @@ function saveTranslationRecord(book, uid, source, translation, options = {}) {
     saveSettingsDebounced();
 }
 
-async function requestWithProfile(prompt, maxTokens = 4096) {
+async function requestWithProfile(prompt, maxTokens = null) {
     const settings = getSettings();
     if (!settings.profileId) {
         throw new Error('로어북 AI 전용 연결 프로필을 먼저 선택해주세요.');
     }
 
+    const requestedMaxTokens = maxTokens ?? settings.aiOutputTokens;
+
     const response = await ConnectionManagerRequestService.sendRequest(
         settings.profileId,
         prompt,
-        maxTokens,
+        requestedMaxTokens,
         {
             stream: false,
             signal: null,
@@ -854,6 +868,7 @@ function createAIBar() {
                         <option value="Japanese">일본어</option>
                         <option value="Chinese (Simplified)">중국어(간체)</option>
                     </select></label>
+                    <label class="slb-field slb-output-tokens-field" title="AI 번역·AI 수정·번역본의 원문 반영에 적용됩니다."><small>AI 출력 토큰</small><input id="slb-output-tokens" class="text_pole" type="number" min="512" max="65536" step="512" inputmode="numeric"></label>
                     <button type="button" id="slb-test-profile" class="menu_button"><i class="fa-solid fa-plug-circle-check"></i> 연결 테스트</button>
                 </div>
                 <label class="slb-field slb-prompt-field"><small>번역 추가 지시문 · AI 프로필 모드에서만 적용</small>
@@ -873,6 +888,7 @@ function createAIBar() {
     const provider = document.getElementById('slb-provider');
     const profile = document.getElementById('slb-profile');
     const language = document.getElementById('slb-language');
+    const outputTokens = document.getElementById('slb-output-tokens');
 
     function syncProviderUI() {
         const usingGoogle = getSettings().translationProvider === 'google';
@@ -882,6 +898,7 @@ function createAIBar() {
     const translatePrompt = document.getElementById('slb-translate-prompt');
     provider.value = settings.translationProvider;
     language.value = settings.language;
+    outputTokens.value = String(settings.aiOutputTokens);
     translatePrompt.value = settings.translationPrompt || '';
     translatePrompt.addEventListener('input', () => {
         settings.translationPrompt = translatePrompt.value;
@@ -906,6 +923,13 @@ function createAIBar() {
         settings.language = language.value;
         saveSettingsDebounced();
         scheduleEnhance();
+    });
+    outputTokens.addEventListener('change', () => {
+        const value = normalizeAIOutputTokens(outputTokens.value);
+        outputTokens.value = String(value);
+        settings.aiOutputTokens = value;
+        saveSettingsDebounced();
+        notify(`AI 출력 토큰을 ${value.toLocaleString()}으로 저장했습니다.`);
     });
     document.getElementById('slb-test-profile').addEventListener('click', async event => {
         const button = event.currentTarget;

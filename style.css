@@ -94,6 +94,16 @@
     max-width: 190px;
 }
 
+#slb-ai-tools .slb-output-tokens-field {
+    flex: 0 1 150px;
+    max-width: 150px;
+}
+
+#slb-ai-tools .slb-output-tokens-field input {
+    box-sizing: border-box;
+    width: 100%;
+}
+
 #slb-ai-tools #slb-test-profile {
     display: inline-flex;
     flex-flow: row nowrap !important;
@@ -791,23 +801,45 @@
     #slb-ai-tools .slb-ai-fields {
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(132px, max-content);
+        grid-template-areas:
+            "provider provider"
+            "profile profile"
+            "language test"
+            "tokens tokens";
         gap: 8px;
         align-items: end;
     }
 
+    #slb-ai-tools .slb-provider-field {
+        grid-area: provider;
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
     #slb-ai-tools .slb-profile-field {
+        grid-area: profile;
         grid-column: 1 / -1;
         width: 100%;
         max-width: none;
     }
 
     #slb-ai-tools .slb-language-field {
+        grid-area: language;
         grid-column: 1;
         width: 100%;
         max-width: none;
     }
 
+    #slb-ai-tools .slb-output-tokens-field {
+        grid-area: tokens;
+        width: min(150px, 100%);
+        max-width: none;
+        justify-self: start;
+    }
+
     #slb-ai-tools #slb-test-profile {
+        grid-area: test;
         grid-column: 2;
         display: inline-flex !important;
         inline-size: max-content !important;
