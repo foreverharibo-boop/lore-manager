@@ -2,6 +2,7 @@ import {
     eventSource,
     event_types,
     saveSettingsDebounced,
+    getRequestHeaders,
 } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
@@ -10,17 +11,26 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)';
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
     language: 'Korean',
+    translationProvider: 'profile',
+    tokenScope: 'active',
     translateMissingOnOpen: true,
     autoTranslateSource: true,
     autoSyncToSource: true,
     translations: {},
+});
+
+const GOOGLE_LANGUAGE_CODES = Object.freeze({
+    'Korean': 'ko',
+    'English': 'en',
+    'Japanese': 'ja',
+    'Chinese (Simplified)': 'zh-CN',
 });
 
 const state = {
@@ -183,8 +193,47 @@ function protectedTextRules() {
     ].join('\n');
 }
 
+function canTranslate() {
+    const settings = getSettings();
+    return settings.translationProvider === 'google' || Boolean(settings.profileId);
+}
+
+// 구글 번역이 {{user}} 같은 매크로를 망가뜨리지 않도록 자리표시자로 감췄다가 복원한다.
+function maskMacros(text) {
+    const macros = [];
+    const masked = String(text ?? '').replace(/{{[^{}]*}}/g, match => {
+        macros.push(match);
+        return `\u27e6${macros.length - 1}\u27e7`;
+    });
+    return { masked, macros };
+}
+
+function unmaskMacros(text, macros) {
+    return String(text ?? '').replace(/\u27e6(\d+)\u27e7/g, (match, index) => macros[Number(index)] ?? match);
+}
+
+async function googleTranslate(text) {
+    const settings = getSettings();
+    const lang = GOOGLE_LANGUAGE_CODES[settings.language] || 'ko';
+    const { masked, macros } = maskMacros(text);
+    const response = await fetch('/api/translate/google', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ text: masked, lang }),
+    });
+    if (!response.ok) {
+        throw new Error('구글 번역 요청에 실패했습니다.');
+    }
+    const translated = await response.text();
+    return unmaskMacros(translated, macros);
+}
+
 async function translateText(source) {
-    const language = getSettings().language;
+    const settings = getSettings();
+    if (settings.translationProvider === 'google') {
+        return googleTranslate(source);
+    }
+    const language = settings.language;
     const prompt = [
         `Translate the lorebook entry below into ${language}.`,
         protectedTextRules(),
@@ -399,49 +448,77 @@ function syncAutoControls() {
 
 function createAIBar() {
     if (document.getElementById('slb-ai-tools')) return;
-    const holder = document.getElementById('wi-holder');
-    const topBlock = document.getElementById('wiTopBlock');
-    if (!holder || !topBlock) return;
+    const container = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
+    if (!container) return;
 
-    const bar = createElement('section', '', '');
+    const bar = createElement('div', 'slb-extension-settings', '');
     bar.id = 'slb-ai-tools';
     bar.innerHTML = `
-        <div class="slb-ai-title">
-            <span><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> 로어북 AI 도구</span>
-            <span class="slb-ai-badge">메인 연결과 독립</span>
-        </div>
-        <div class="slb-ai-fields">
-            <label class="slb-field slb-profile-field"><small>AI 전용 연결 프로필</small><select id="slb-profile" class="text_pole"></select></label>
-            <label class="slb-field slb-language-field"><small>번역 언어</small><select id="slb-language" class="text_pole">
-                <option value="Korean">한국어</option>
-                <option value="English">영어</option>
-                <option value="Japanese">일본어</option>
-                <option value="Chinese (Simplified)">중국어(간체)</option>
-            </select></label>
-            <button type="button" id="slb-test-profile" class="menu_button"><i class="fa-solid fa-plug-circle-check"></i> 연결 테스트</button>
-        </div>
-        <div class="slb-ai-options">
-            <label><input type="checkbox" id="slb-translate-missing"> 번역본 없는 항목을 열 때 자동 번역</label>
-            <label><input type="checkbox" id="slb-auto-translate"> 원문 변경 시 자동 번역</label>
-            <label><input type="checkbox" id="slb-auto-sync"> 번역 변경 시 원문 자동 반영</label>
-            <small id="slb-ai-status">전용 프로필을 선택하면 번역 기능을 사용할 수 있습니다.</small>
+        <div class="inline-drawer">
+            <div class="inline-drawer-toggle inline-drawer-header">
+                <b><i class="fa-solid fa-book" aria-hidden="true"></i> 로어북 매니저</b>
+                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+            </div>
+            <div class="inline-drawer-content">
+                <div class="slb-ai-title">
+                    <span><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> 번역 · AI 도구</span>
+                    <span class="slb-ai-badge">메인 연결과 독립</span>
+                </div>
+                <div class="slb-ai-fields">
+                    <label class="slb-field slb-provider-field"><small>번역 방식</small><select id="slb-provider" class="text_pole">
+                        <option value="profile">AI 전용 연결 프로필</option>
+                        <option value="google">구글 번역 (무료)</option>
+                    </select></label>
+                    <label class="slb-field slb-profile-field"><small>AI 전용 연결 프로필</small><select id="slb-profile" class="text_pole"></select></label>
+                    <label class="slb-field slb-language-field"><small>번역 언어</small><select id="slb-language" class="text_pole">
+                        <option value="Korean">한국어</option>
+                        <option value="English">영어</option>
+                        <option value="Japanese">일본어</option>
+                        <option value="Chinese (Simplified)">중국어(간체)</option>
+                    </select></label>
+                    <button type="button" id="slb-test-profile" class="menu_button"><i class="fa-solid fa-plug-circle-check"></i> 연결 테스트</button>
+                </div>
+                <div class="slb-ai-options">
+                    <label><input type="checkbox" id="slb-translate-missing"> 번역본 없는 항목을 열 때 자동 번역</label>
+                    <label><input type="checkbox" id="slb-auto-translate"> 원문 변경 시 자동 번역</label>
+                    <label><input type="checkbox" id="slb-auto-sync"> 번역 변경 시 원문 자동 반영</label>
+                    <small class="slb-ai-note">AI 수정·키워드 추천·원문 반영은 구글 번역 모드에서도 전용 프로필을 사용합니다.</small>
+                    <small id="slb-ai-status">확장 탭에서 번역 방식을 설정해주세요.</small>
+                </div>
+            </div>
         </div>`;
 
-    topBlock.insertAdjacentElement('afterend', bar);
+    container.append(bar);
     fillProfileSelect();
 
     const settings = getSettings();
+    const provider = document.getElementById('slb-provider');
     const profile = document.getElementById('slb-profile');
     const language = document.getElementById('slb-language');
     const translateMissing = document.getElementById('slb-translate-missing');
     const autoTranslate = document.getElementById('slb-auto-translate');
     const autoSync = document.getElementById('slb-auto-sync');
 
+    function syncProviderUI() {
+        const usingGoogle = getSettings().translationProvider === 'google';
+        document.querySelector('.slb-profile-field')?.classList.toggle('slb-dimmed', usingGoogle);
+    }
+
+    provider.value = settings.translationProvider;
     language.value = settings.language;
     translateMissing.checked = settings.translateMissingOnOpen;
     autoTranslate.checked = settings.autoTranslateSource;
     autoSync.checked = settings.autoSyncToSource;
+    syncProviderUI();
 
+    provider.addEventListener('change', () => {
+        settings.translationProvider = provider.value;
+        saveSettingsDebounced();
+        syncProviderUI();
+        notify(provider.value === 'google'
+            ? '번역에 구글 번역(무료)을 사용합니다. AI 수정·키워드 추천·원문 반영에는 전용 프로필이 계속 필요합니다.'
+            : '번역에 AI 전용 연결 프로필을 사용합니다.');
+    });
     profile.addEventListener('change', () => {
         settings.profileId = profile.value;
         saveSettingsDebounced();
@@ -469,9 +546,15 @@ function createAIBar() {
         const button = event.currentTarget;
         button.disabled = true;
         try {
-            const answer = await requestWithProfile('Reply with exactly: OK', 16);
-            if (!/^OK\b/i.test(answer)) throw new Error('프로필 응답 형식이 예상과 다릅니다.');
-            notify('전용 프로필 연결 성공 · 메인 연결 프로필은 변경되지 않았습니다.', 'success');
+            if (getSettings().translationProvider === 'google') {
+                const sample = await googleTranslate('Hello, world.');
+                if (!sample.trim()) throw new Error('구글 번역 응답이 비어 있습니다.');
+                notify(`구글 번역 연결 성공 · 예시: ${sample.trim().slice(0, 40)}`, 'success');
+            } else {
+                const answer = await requestWithProfile('Reply with exactly: OK', 16);
+                if (!/^OK\b/i.test(answer)) throw new Error('프로필 응답 형식이 예상과 다릅니다.');
+                notify('전용 프로필 연결 성공 · 메인 연결 프로필은 변경되지 않았습니다.', 'success');
+            }
         } catch (error) {
             notify(error.message || '연결 테스트에 실패했습니다.', 'error');
         } finally {
@@ -490,7 +573,10 @@ function createWorkspace() {
     tokens.id = 'slb-token-strip';
     tokens.innerHTML = `
         <span>전체 항목 <strong id="slb-total-tokens">—</strong></span>
-        <span>활성화된 항목만 <strong id="slb-active-tokens">—</strong></span>
+        <span><select id="slb-token-scope" class="slb-token-scope" title="두 번째 토큰 합계의 기준">
+            <option value="active">활성 항목</option>
+            <option value="constant">상시 주입 🔵</option>
+        </select> <strong id="slb-active-tokens">—</strong></span>
         <span>항목 수 <strong id="slb-entry-count">—</strong></span>`;
 
     const workspace = createElement('div', 'slb-workspace');
@@ -505,6 +591,14 @@ function createWorkspace() {
         <div id="slb-nav-list" class="slb-nav-list"></div>`;
 
     popup.insertBefore(tokens, entries);
+
+    const tokenScope = document.getElementById('slb-token-scope');
+    tokenScope.value = getSettings().tokenScope;
+    tokenScope.addEventListener('change', () => {
+        getSettings().tokenScope = tokenScope.value;
+        saveSettingsDebounced();
+        renderTokenSummary(currentBookName(), state.currentBookData);
+    });
     popup.insertBefore(workspace, entries);
     workspace.append(navigator, entries);
     state.workspace = workspace;
@@ -525,6 +619,10 @@ function createWorkspace() {
         const uid = getUid(entry);
         if (event.target.matches('textarea[name="comment"], select[name="entryStateSelector"]')) {
             updateNavigatorEntry(uid);
+            if (event.target.matches('select[name="entryStateSelector"]')) {
+                // 🔵 상시 여부가 바뀌면 '상시 주입' 합계에 즉시 반영
+                setTimeout(() => renderTokenSummary(currentBookName(), state.currentBookData), 0);
+            }
         }
         if (event.target.matches('textarea[name="content"]')) {
             scheduleEntryTokenCount(currentBookName(), uid, event.target.value);
@@ -538,15 +636,6 @@ function createWorkspace() {
         // SillyTavern changes its data and classes synchronously in the target
         // click handler. Read that new state after the event reaches us.
         setTimeout(() => syncEntryActiveState(entry), 0);
-    });
-
-    document.getElementById('OpenAllWIEntries')?.addEventListener('click', () => {
-        workspace.classList.add('slb-show-all');
-        scheduleEnhance();
-    });
-    document.getElementById('CloseAllWIEntries')?.addEventListener('click', () => {
-        workspace.classList.add('slb-show-all');
-        scheduleEnhance();
     });
 
     state.observer = new MutationObserver(mutations => {
@@ -902,7 +991,6 @@ function selectEntry(uid, open = false) {
     if (!entries.some(entry => getUid(entry) === String(uid))) return;
 
     state.selectedUid = String(uid);
-    state.workspace?.classList.remove('slb-show-all');
     for (const entry of entries) {
         entry.classList.toggle('slb-selected', getUid(entry) === state.selectedUid);
     }
@@ -914,8 +1002,11 @@ function selectEntry(uid, open = false) {
     if (mobile) mobile.value = state.selectedUid;
 
     const selected = entries.find(entry => getUid(entry) === state.selectedUid);
-    if (open && selected && !selected.querySelector('.world_entry_edit')) {
-        selected.querySelector('.inline-drawer-toggle')?.click();
+    if (open && selected) {
+        if (!selected.querySelector('.world_entry_edit')) {
+            selected.querySelector('.inline-drawer-toggle')?.click();
+        }
+        selected.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     setTimeout(() => enhanceEntry(selected), 0);
 }
@@ -958,7 +1049,8 @@ function rebuildNavigator() {
         state.selectedUid = getUid(opened || entries[0]);
     }
 
-    if (state.selectedUid) selectEntry(state.selectedUid, true);
+    // 재구성 시에는 하이라이트만 갱신하고 자동으로 열거나 스크롤하지 않는다.
+    if (state.selectedUid) selectEntry(state.selectedUid, false);
 }
 
 function setEntryBusy(ui, busy, message = '') {
@@ -989,8 +1081,8 @@ async function translateEntrySource(ui, force = false, background = false) {
     const settings = getSettings();
     const source = ui.source.value;
     if (!source.trim()) return;
-    if (!settings.profileId) {
-        ui.status.textContent = '전용 연결 프로필을 선택하면 번역할 수 있습니다.';
+    if (!canTranslate()) {
+        ui.status.textContent = '확장 탭에서 번역 방식(전용 프로필 또는 구글 번역)을 설정해주세요.';
         return;
     }
     if (!force && !settings.autoTranslateSource) {
@@ -1032,7 +1124,7 @@ async function reflectEntryTranslation(ui) {
     const source = ui.source.value;
     if (!translation.trim() || !source.trim()) return;
     if (!getSettings().profileId) {
-        ui.status.textContent = '전용 연결 프로필을 선택하면 원문에 반영할 수 있습니다.';
+        ui.status.textContent = '원문 반영은 AI 기능이라 전용 연결 프로필이 필요합니다. (구글 번역은 번역에만 사용됩니다.)';
         return;
     }
 
@@ -1215,10 +1307,11 @@ function enhanceEntry(entry) {
     keywordResults.append(keywordTextarea, keywordActions, keywordStatus);
     keywordAssistant.append(keywordHead, keywordHelp, keywordResults);
 
-    panels.content.append(contentBlock, syncRow, entryMeta);
+    panels.content.append(contentBlock, syncRow);
     if (commentContainer) panels.content.append(commentContainer);
     panels.activation.append(keywordAssistant);
     if (activationContainer && activationContainer.isConnected) panels.activation.append(activationContainer);
+    panels.activation.append(entryMeta);
 
     if (groupRow) {
         groupRow.classList.add('slb-group-grid');
@@ -1251,7 +1344,7 @@ function enhanceEntry(entry) {
         syncStatus.textContent = record.sourceHash === hashText(source.value) ? '저장된 번역을 불러왔습니다.' : '원문이 변경되어 번역 갱신이 필요합니다.';
     } else {
         syncStatus.textContent = settings.translateMissingOnOpen
-            ? (settings.profileId ? '번역본 없음 · 항목을 열면 자동 번역합니다.' : '번역본 없음 · 전용 연결 프로필을 선택해주세요.')
+            ? (canTranslate() ? '번역본 없음 · 항목을 열면 자동 번역합니다.' : '번역본 없음 · 확장 탭에서 번역 방식을 설정해주세요.')
             : '번역본 없음 · 자동 번역이 꺼져 있습니다.';
     }
 
@@ -1349,7 +1442,7 @@ function enhanceEntry(entry) {
     updateEntrySyncMode(ui);
 
     const hasTranslation = record?.language === settings.language && Boolean(record.text?.trim());
-    if (!hasTranslation && settings.translateMissingOnOpen && settings.profileId) {
+    if (!hasTranslation && settings.translateMissingOnOpen && canTranslate()) {
         setTimeout(() => translateEntrySource(ui, true, true), 350);
     }
 }
@@ -1427,9 +1520,12 @@ function renderTokenSummary(book, data) {
 
     const entries = lorebookEntries(data);
     const cache = getBookTokenCache(book);
+    const scope = getSettings().tokenScope;
+    const inScope = entry => !entry.disable && (scope !== 'constant' || Boolean(entry.constant));
     let total = 0;
     let active = 0;
     let activeCount = 0;
+    let scopeCount = 0;
     let readyCount = 0;
     let activeReadyCount = 0;
     for (const entry of entries) {
@@ -1439,8 +1535,9 @@ function renderTokenSummary(book, data) {
             total += cached.count;
             readyCount++;
         }
-        if (!entry.disable) {
-            activeCount++;
+        if (!entry.disable) activeCount++;
+        if (inScope(entry)) {
+            scopeCount++;
             if (isReady) {
                 active += cached.count;
                 activeReadyCount++;
@@ -1453,12 +1550,14 @@ function renderTokenSummary(book, data) {
         : readyCount
             ? `${total.toLocaleString()} 토큰 · 계산 중…`
             : '계산 중…';
-    activeElement.textContent = activeReadyCount === activeCount
+    activeElement.textContent = activeReadyCount === scopeCount
         ? `${active.toLocaleString()} 토큰`
         : activeReadyCount
             ? `${active.toLocaleString()} 토큰 · 계산 중…`
-            : '계산 중…';
-    countElement.textContent = `${entries.length}개 · 활성 ${activeCount}개`;
+            : (scopeCount ? '계산 중…' : '0 토큰');
+    countElement.textContent = scope === 'constant'
+        ? `${entries.length}개 · 활성 ${activeCount}개 · 상시 ${scopeCount}개`
+        : `${entries.length}개 · 활성 ${activeCount}개`;
 }
 
 function queueTokenSummaryRender(book, data) {
