@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.24';
+const VERSION = '1.3.25';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -87,7 +87,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-3-24';
+    const styleId = 'slb-critical-layout-1-3-25';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -109,6 +109,7 @@ function ensureCriticalLayoutStyles() {
 #slb-ai-tools #slb-quick-options-host>.slb-quick-options{display:grid!important;grid-template-columns:minmax(0,1.48fr) minmax(0,1fr)!important;gap:5px 6px!important;width:100%!important;min-width:0!important;font-size:clamp(9px,2.35vw,.88em)!important}
 #slb-ai-tools #slb-quick-options-host>.slb-quick-options>label{display:inline-flex!important;min-width:0!important;align-items:center!important;gap:4px!important;white-space:nowrap!important;word-break:keep-all!important;overflow-wrap:normal!important}
 #slb-ai-tools #slb-quick-options-host>.slb-quick-options>label:last-child{grid-column:1/-1!important}
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-panel[data-panel="activation"].is-active>.slb-activation-overview[data-slb-visible="true"]:not(:empty){display:grid!important;visibility:visible!important;opacity:1!important}
 @media(max-width:760px){
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:36px var(--slb-slot-h) 28px!important;column-gap:12px!important;padding:0!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot{height:36px!important;padding:0 2px!important}
@@ -1571,6 +1572,20 @@ function enhanceEntryHeader(entry) {
     header.append(shell);
     thinControls?.remove();
 
+    // 모바일 호출 조건에 잠시 옮겨 둔 네이티브 컨트롤은 항목을 접을 때
+    // SillyTavern의 editOutlet 정리 대상이 된다. 접기/펼치기 동작이 시작되기
+    // 전에 영구 헤더 안의 stash로 되돌려 컨트롤 자체가 삭제되지 않게 한다.
+    drawerToggle?.addEventListener('click', () => {
+        const stash = entry.querySelector('.slb-deferred-header-fields');
+        const responsiveFields = getResponsiveHeaderFields(entry);
+        if (stash && responsiveFields.length) stash.append(...responsiveFields);
+        const overview = entry.querySelector('.slb-activation-overview');
+        if (overview) {
+            overview.hidden = true;
+            overview.dataset.slbVisible = 'false';
+        }
+    });
+
     entry.dataset.slbHeaderEnhanced = VERSION;
     observeResponsiveHeader(entry);
     placeResponsiveHeaderFields(entry);
@@ -1606,10 +1621,26 @@ function syncEntryInjectionState(entry) {
     }
 }
 
+function isNarrowEntryLayout(entry) {
+    if (state.responsiveMedia?.matches || window.matchMedia('(max-width: 760px)').matches) return true;
+
+    // 일부 Android WebView/브라우저의 "데스크톱 사이트" 모드에서는
+    // matchMedia 폭이 실제 로어북 패널 폭보다 크게 보고된다. 이 경우에도
+    // visualViewport와 실제 패널 폭을 함께 보아 모바일 레이아웃을 유지한다.
+    const viewportWidths = [
+        window.visualViewport?.width,
+        window.innerWidth,
+        document.documentElement?.clientWidth,
+    ].filter(value => Number.isFinite(value) && value > 0);
+    if (viewportWidths.some(width => width <= 760)) return true;
+
+    const layoutRoot = entry?.closest('#WorldInfo, #world_popup');
+    const layoutWidth = layoutRoot?.getBoundingClientRect?.().width || layoutRoot?.clientWidth || 0;
+    return layoutWidth > 0 && layoutWidth <= 760;
+}
+
 function shouldUseCompactHeader(entry) {
-    const narrowViewport = state.responsiveMedia?.matches
-        ?? window.matchMedia('(max-width: 760px)').matches;
-    if (narrowViewport) return true;
+    if (isNarrowEntryLayout(entry)) return true;
 
     const shell = entry?.querySelector('.slb-entry-header-shell');
     if (!shell) return false;
@@ -1626,31 +1657,72 @@ function shouldUseCompactHeader(entry) {
     return availableWidth < FULL_HEADER_FIELDS_MIN_WIDTH + reservedWidth;
 }
 
-function placeResponsiveHeaderFields(entry) {
-    if (!entry) return;
-    const grid = entry.querySelector('.slb-header-grid');
-    const stash = entry.querySelector('.slb-deferred-header-fields');
-    const overview = entry.querySelector('.slb-activation-overview');
-    if (!grid || !stash) return;
-
-    const fields = [
+function getResponsiveHeaderFields(entry) {
+    if (!entry) return [];
+    return [
         entry.querySelector('.slb-strategy-field'),
         entry.querySelector('.slb-position-field'),
         entry.querySelector('.slb-depth-field'),
         entry.querySelector('.slb-order-field'),
         entry.querySelector('.slb-trigger-field'),
     ].filter(Boolean);
+}
+
+function placeResponsiveHeaderFields(entry, forceCompact = false) {
+    if (!entry) return;
+    const grid = entry.querySelector('.slb-header-grid');
+    const stash = entry.querySelector('.slb-deferred-header-fields');
+    const overview = entry.querySelector('.slb-activation-overview');
+    if (!grid || !stash) return;
+
+    const fields = getResponsiveHeaderFields(entry);
     if (!fields.length) {
         if (overview) overview.hidden = true;
         entry.classList.remove('slb-compact-entry');
         return;
     }
-    const compact = shouldUseCompactHeader(entry);
-    const target = compact ? (overview || stash) : grid;
+    const compact = forceCompact || shouldUseCompactHeader(entry);
+    const activationActive = Boolean(overview
+        ?.closest('.slb-panel[data-panel="activation"]')
+        ?.classList.contains('is-active'));
+    // 좁은 화면에서도 호출 조건 탭을 보고 있을 때만 editOutlet 내부로
+    // 이동한다. 그 외에는 삭제되지 않는 헤더 stash에 안전하게 보관한다.
+    const target = compact
+        ? (activationActive && overview ? overview : stash)
+        : grid;
     if (fields.some(field => field.parentElement !== target)) target.append(...fields);
     entry.classList.toggle('slb-compact-entry', compact);
     grid.classList.toggle('slb-header-title-only', compact);
-    if (overview) overview.hidden = !compact;
+    if (overview) {
+        const visible = compact && activationActive && fields.length > 0;
+        overview.hidden = !visible;
+        overview.dataset.slbVisible = String(visible);
+    }
+}
+
+function restoreMobileActivationOverview(entry) {
+    if (!entry?.isConnected) return;
+    const panel = entry.querySelector('.slb-panel[data-panel="activation"]');
+    if (!panel?.classList.contains('is-active')) return;
+
+    const compact = entry.classList.contains('slb-compact-entry') || isNarrowEntryLayout(entry);
+    if (!compact) return;
+
+    // 호출 조건 탭이 열린 뒤 ST가 헤더/폼을 다시 측정해도 최상단 다섯 필드가
+    // 숨김 stash로 돌아가지 않도록 원본 컨트롤 노드를 overview에 재부착한다.
+    placeResponsiveHeaderFields(entry, true);
+    const overview = entry.querySelector('.slb-activation-overview');
+    if (overview) {
+        overview.hidden = false;
+        overview.removeAttribute('hidden');
+        overview.dataset.slbVisible = 'true';
+    }
+
+    // 상단 항목 필터는 사용자가 펼쳐 둔 상태라면 항목 탭 전환 뒤에도 유지한다.
+    const filterSection = document.getElementById('slb-entry-filters-section');
+    if (filterSection && !getSettings().entryFiltersCollapsed) {
+        setSummarySectionCollapsed(filterSection, false);
+    }
 }
 
 function syncResponsiveEntryLayouts() {
@@ -2446,6 +2518,13 @@ function enhanceEntry(entry) {
     function showTab(name) {
         tabs.forEach(tab => tab.classList.toggle('is-active', tab.dataset.tab === name));
         Object.entries(panels).forEach(([panelName, panel]) => panel.classList.toggle('is-active', panelName === name));
+        // 다른 탭으로 이동하면 컨트롤을 즉시 안전한 헤더 stash로 되돌린다.
+        placeResponsiveHeaderFields(entry);
+        if (name === 'activation') {
+            restoreMobileActivationOverview(entry);
+            requestAnimationFrame(() => restoreMobileActivationOverview(entry));
+            setTimeout(() => restoreMobileActivationOverview(entry), 60);
+        }
     }
     tabs.forEach(tab => tab.addEventListener('click', () => showTab(tab.dataset.tab)));
     showTab('content');

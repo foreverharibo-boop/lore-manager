@@ -3107,6 +3107,17 @@
     grid-column: 1 / -1 !important;
 }
 
+/* v1.3.25 — 모바일 호출 조건 최상단 네이티브 필드 생명주기 보호.
+   JS가 실제 필드를 호출 조건 패널에 붙였다고 표시한 경우 hidden 잔여값이나
+   구버전 테마 규칙이 행 전체를 감추지 못하도록 마지막 방어선을 둔다. */
+#WorldInfo.slb-active .world_entry.slb-compact-entry
+    .slb-panel[data-panel="activation"].is-active
+    > .slb-activation-overview[data-slb-visible="true"]:not(:empty) {
+    display: grid !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
 @media (max-width: 760px) {
     #WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-filter-grid {
         --slb-filter-box-height: 96px;
