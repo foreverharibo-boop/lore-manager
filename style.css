@@ -194,10 +194,46 @@
     opacity: 0.3;
 }
 
-#WorldInfo.slb-active .slb-mobile-select {
+#WorldInfo.slb-active .slb-mobile-row {
     display: none;
     width: 100%;
     margin-top: 5px;
+    gap: 6px;
+    align-items: center;
+}
+
+#WorldInfo.slb-active .slb-mobile-row .slb-mobile-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+    margin: 0;
+}
+
+#WorldInfo.slb-active .slb-mobile-sort {
+    flex: 0 0 auto;
+    margin: 0;
+}
+
+#WorldInfo.slb-active .slb-mobile-sort.slb-active-toggle {
+    background: var(--slb-accent);
+}
+
+#WorldInfo.slb-active .slb-nav-item {
+    touch-action: pan-y;
+}
+
+#WorldInfo.slb-active .slb-nav-item.slb-drag-active {
+    opacity: 0.9;
+    transform: scale(1.02);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    background: var(--SmartThemeBlurTintColor, rgba(255, 255, 255, 0.08));
+    z-index: 5;
+}
+
+#WorldInfo.slb-active .slb-nav-list.slb-drag-list {
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 #WorldInfo.slb-active #world_popup_entries_list {
@@ -618,8 +654,15 @@
         display: none;
     }
 
-    #WorldInfo.slb-active .slb-mobile-select {
-        display: block;
+    #WorldInfo.slb-active .slb-workspace.slb-mobile-sorting .slb-nav-list {
+        display: flex;
+        max-height: 42vh;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+
+    #WorldInfo.slb-active .slb-mobile-row {
+        display: flex;
     }
 
     #WorldInfo.slb-active .slb-ai-fields {

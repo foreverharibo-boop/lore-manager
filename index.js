@@ -5,15 +5,15 @@ import {
 } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
-import { loadWorldInfo, splitKeywordsAndRegexes } from '../../../world-info.js';
+import { loadWorldInfo, splitKeywordsAndRegexes, saveWorldInfo, setWIOriginalDataValue } from '../../../world-info.js';
 import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.1.6';
+const VERSION = '1.2.0';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
-const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry';
+const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)';
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
     language: 'Korean',
@@ -35,6 +35,8 @@ const state = {
     tokenRunId: 0,
     tokenRefreshRunId: 0,
     pendingBookSwitch: '',
+    sorting: false,
+    navDragging: false,
     tokenCache: new Map(),
     tokenCacheTouched: new Map(),
     tokenCachePersistTimer: null,
@@ -496,7 +498,10 @@ function createWorkspace() {
     const navigator = createElement('aside', 'slb-navigator');
     navigator.innerHTML = `
         <div class="slb-nav-head"><strong>항목</strong><small id="slb-page-count">0개</small></div>
-        <select id="slb-mobile-select" class="text_pole slb-mobile-select" aria-label="편집할 로어북 항목"></select>
+        <div class="slb-mobile-row">
+            <select id="slb-mobile-select" class="text_pole slb-mobile-select" aria-label="편집할 로어북 항목"></select>
+            <button type="button" id="slb-mobile-sort" class="menu_button slb-mobile-sort" title="항목 순서 편집 (드래그 정렬)"><i class="fa-solid fa-arrow-down-up-across-line" aria-hidden="true"></i></button>
+        </div>
         <div id="slb-nav-list" class="slb-nav-list"></div>`;
 
     popup.insertBefore(tokens, entries);
@@ -506,6 +511,12 @@ function createWorkspace() {
 
     document.getElementById('slb-mobile-select').addEventListener('change', event => {
         selectEntry(event.currentTarget.value, true);
+    });
+
+    document.getElementById('slb-mobile-sort').addEventListener('click', () => {
+        const sorting = workspace.classList.toggle('slb-mobile-sorting');
+        document.getElementById('slb-mobile-sort').classList.toggle('slb-active-toggle', sorting);
+        notify(sorting ? '항목을 길게 눌러 드래그하면 순서가 바뀝니다.' : '순서 편집을 마쳤습니다.');
     });
 
     entries.addEventListener('input', event => {
@@ -539,6 +550,10 @@ function createWorkspace() {
     });
 
     state.observer = new MutationObserver(mutations => {
+        // 네이티브 드래그 정렬 중에는 jQuery UI가 헬퍼/플레이스홀더를 만들면서
+        // 변이가 쏟아진다. 이때 enhance가 돌면 드래그 중인 DOM을 재구성해서
+        // 정렬이 끊기므로 전부 무시하고, 드래그가 끝난 뒤 한 번에 갱신한다.
+        if (state.sorting) return;
         let listChanged = false;
         let entryChanged = false;
         for (const mutation of mutations) {
@@ -558,6 +573,20 @@ function createWorkspace() {
         if (listChanged || entryChanged) scheduleEnhance();
     });
     state.observer.observe(entries, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+
+    // ST의 jQuery UI sortable은 시작/종료 시 엘리먼트에 sortstart/sortstop을 발생시킨다.
+    jQuery(entries)
+        .off('sortstart.slb sortstop.slb')
+        .on('sortstart.slb', () => {
+            state.sorting = true;
+        })
+        .on('sortstop.slb', () => {
+            state.sorting = false;
+            state.navigatorDirty = true;
+            scheduleEnhance();
+        });
+
+    setupNavigatorDrag();
 }
 
 function renderedEntries() {
@@ -698,6 +727,176 @@ function updateNavigatorEntry(uid) {
     if (option) option.textContent = `${stateIcon} ${label}`;
 }
 
+async function commitNavigatorOrder() {
+    const book = currentBookName();
+    const data = state.currentBookData;
+    if (!book || state.currentBook !== book || !data?.entries) return;
+    const navList = document.getElementById('slb-nav-list');
+    const entriesList = document.getElementById('world_popup_entries_list');
+    if (!navList || !entriesList) return;
+
+    const orderedUids = Array.from(navList.querySelectorAll('.slb-nav-item')).map(item => String(item.dataset.uid));
+    const elements = new Map(renderedEntries().map(element => [getUid(element), element]));
+    if (orderedUids.length < 2 || orderedUids.some(uid => !elements.has(uid))) return;
+
+    // 네이티브 드래그 정렬(sortable stop)과 동일한 규칙:
+    // 현재 페이지 항목들의 최소 displayIndex부터 순서대로 다시 부여한다.
+    const indices = orderedUids
+        .map(uid => (data.entries[uid] ?? data.entries[Number(uid)])?.displayIndex)
+        .filter(value => Number.isFinite(value));
+    const minDisplayIndex = indices.length ? Math.min(...indices) : 0;
+
+    let changed = false;
+    orderedUids.forEach((uid, index) => {
+        const item = data.entries[uid] ?? data.entries[Number(uid)];
+        if (!item) return;
+        const next = minDisplayIndex + index;
+        if (item.displayIndex !== next) {
+            item.displayIndex = next;
+            setWIOriginalDataValue(data, uid, 'extensions.display_index', next);
+            changed = true;
+        }
+    });
+
+    // 실제 항목 DOM도 같은 순서로 재배치해 네이티브 정렬 결과와 동일한 상태로 만든다.
+    orderedUids.forEach(uid => entriesList.append(elements.get(uid)));
+
+    state.navigatorDirty = true;
+    scheduleEnhance();
+    if (!changed) return;
+    try {
+        await saveWorldInfo(book, data);
+        notify('항목 순서를 저장했습니다.', 'success');
+    } catch (error) {
+        console.warn('[로어북 매니저] Failed to save entry order', error);
+        notify('항목 순서 저장에 실패했습니다.', 'error');
+    }
+}
+
+function setupNavigatorDrag() {
+    const list = document.getElementById('slb-nav-list');
+    if (!list || list.dataset.slbDrag) return;
+    list.dataset.slbDrag = '1';
+
+    let drag = null;
+    let suppressClick = false;
+
+    function activate() {
+        if (!drag || drag.active) return;
+        drag.active = true;
+        drag.scroller = getScrollParent(list);
+        state.navDragging = true;
+        try { drag.item.setPointerCapture(drag.pointerId); } catch { /* ignore */ }
+        drag.item.classList.add('slb-drag-active');
+        list.classList.add('slb-drag-list');
+        if (window.navigator.vibrate) window.navigator.vibrate(10);
+    }
+
+    function cleanup(commit) {
+        if (!drag) return;
+        clearTimeout(drag.holdTimer);
+        const wasActive = drag.active;
+        try { drag.item.releasePointerCapture(drag.pointerId); } catch { /* ignore */ }
+        drag.item.classList.remove('slb-drag-active');
+        list.classList.remove('slb-drag-list');
+        drag = null;
+        if (wasActive) {
+            state.navDragging = false;
+            suppressClick = true;
+            if (commit) commitNavigatorOrder();
+            else if (state.navigatorDirty) scheduleEnhance();
+        }
+    }
+
+    function reorderPreview(clientY) {
+        const items = Array.from(list.querySelectorAll('.slb-nav-item')).filter(element => element !== drag.item);
+        const before = items.find(element => {
+            const rect = element.getBoundingClientRect();
+            return clientY < rect.top + rect.height / 2;
+        });
+        if (before) list.insertBefore(drag.item, before);
+        else list.append(drag.item);
+    }
+
+    function getScrollParent(element) {
+        let node = element;
+        while (node && node !== document.body) {
+            const style = getComputedStyle(node);
+            if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight) return node;
+            node = node.parentElement;
+        }
+        return document.scrollingElement || document.documentElement;
+    }
+
+    function autoScroll(clientY) {
+        const scroller = drag?.scroller;
+        if (!scroller) return;
+        const isRoot = scroller === document.scrollingElement || scroller === document.documentElement;
+        const top = isRoot ? 0 : scroller.getBoundingClientRect().top;
+        const bottom = isRoot ? window.innerHeight : scroller.getBoundingClientRect().bottom;
+        const zone = 48;
+        if (clientY < top + zone) scroller.scrollTop -= 14;
+        else if (clientY > bottom - zone) scroller.scrollTop += 14;
+    }
+
+    list.addEventListener('pointerdown', event => {
+        const item = event.target.closest('.slb-nav-item');
+        if (!item || drag) return;
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        drag = {
+            item,
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            active: false,
+            holdTimer: null,
+        };
+        if (event.pointerType !== 'mouse') {
+            // 터치: 길게 눌러야 드래그 시작 (탭=선택, 스와이프=스크롤 유지)
+            drag.holdTimer = setTimeout(activate, 320);
+        }
+    });
+
+    list.addEventListener('pointermove', event => {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+        if (!drag.active) {
+            if (distance > 8) {
+                if (event.pointerType === 'mouse') {
+                    activate();
+                } else {
+                    // 롱프레스 전에 움직임 → 스크롤 제스처로 간주하고 드래그 취소
+                    clearTimeout(drag.holdTimer);
+                    drag = null;
+                }
+            }
+            return;
+        }
+        event.preventDefault();
+        reorderPreview(event.clientY);
+        autoScroll(event.clientY);
+    });
+
+    // 활성 드래그 중 페이지/목록 스크롤 방지 (touch-action만으로는 늦는 경우 대비)
+    list.addEventListener('touchmove', event => {
+        if (drag?.active) event.preventDefault();
+    }, { passive: false });
+
+    list.addEventListener('pointerup', event => {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        cleanup(true);
+    });
+    list.addEventListener('pointercancel', () => cleanup(false));
+
+    // 드래그 직후 발생하는 클릭이 항목 선택으로 이어지지 않게 차단
+    list.addEventListener('click', event => {
+        if (!suppressClick) return;
+        suppressClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+    }, true);
+}
+
 function selectEntry(uid, open = false) {
     const entries = renderedEntries();
     if (!entries.some(entry => getUid(entry) === String(uid))) return;
@@ -722,6 +921,10 @@ function selectEntry(uid, open = false) {
 }
 
 function rebuildNavigator() {
+    if (state.navDragging) {
+        state.navigatorDirty = true;
+        return;
+    }
     const list = document.getElementById('slb-nav-list');
     const mobile = document.getElementById('slb-mobile-select');
     if (!list || !mobile) return;
@@ -1314,6 +1517,7 @@ function scheduleEntryTokenCount(book, uid, content) {
 }
 
 function syncLiveEditorTokens() {
+    if (state.sorting || state.navDragging) return;
     const book = currentBookName();
     if (!book) return;
 
@@ -1439,6 +1643,7 @@ function scheduleTokenSummary(data = null, delay = 500) {
 }
 
 function enhanceAll() {
+    if (state.sorting) return;
     createAIBar();
     createWorkspace();
     hideNativeHeaderRows();
