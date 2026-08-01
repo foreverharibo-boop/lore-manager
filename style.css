@@ -210,6 +210,56 @@
     margin: 0 0 8px;
 }
 
+/* The native desktop header is a single fixed-width row, so it drifts away
+   from fields when the extension changes the editor width. Each field gets
+   its own label instead. */
+#WorldInfo.slb-active #WIEntryHeaderTitlesPC {
+    display: none !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-native-header-main,
+#WorldInfo.slb-active .world_entry .slb-native-header-controls {
+    align-items: flex-end !important;
+    gap: 5px;
+}
+
+#WorldInfo.slb-active .world_entry .slb-header-field {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-end;
+}
+
+#WorldInfo.slb-active .world_entry .slb-title-field {
+    flex: 1 1 150px;
+}
+
+#WorldInfo.slb-active .world_entry .slb-strategy-field,
+#WorldInfo.slb-active .world_entry .slb-position-field,
+#WorldInfo.slb-active .world_entry .slb-depth-field,
+#WorldInfo.slb-active .world_entry .slb-order-field,
+#WorldInfo.slb-active .world_entry .slb-trigger-field {
+    flex: 0 0 auto;
+}
+
+#WorldInfo.slb-active .world_entry .slb-header-label,
+#WorldInfo.slb-active .world_entry .WIEntryHeaderTitleMobile.slb-header-label {
+    display: block !important;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0 0 3px;
+    line-height: 1.05;
+    text-align: center;
+    white-space: nowrap;
+    word-break: keep-all;
+}
+
+#WorldInfo.slb-active .world_entry .slb-header-field > .text_pole {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+
 #WorldInfo.slb-active .world_entry.slb-selected > .world_entry_form {
     border-color: var(--slb-border);
 }

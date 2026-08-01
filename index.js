@@ -10,7 +10,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry';
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
@@ -510,6 +510,42 @@ function createWorkspace() {
 
 function renderedEntries() {
     return Array.from(document.querySelectorAll(ENTRY_SELECTOR));
+}
+
+function enhanceEntryHeader(entry) {
+    if (!entry || entry.dataset.slbHeaderEnhanced === VERSION) return;
+
+    const titleAndStatus = entry.querySelector('.WIEntryTitleAndStatus');
+    const titleField = titleAndStatus?.querySelector(':scope > .flex-container.flex1');
+    const stateSelect = titleAndStatus?.querySelector(':scope > select[name="entryStateSelector"]');
+    const controls = entry.querySelector('.WIEnteryHeaderControls');
+    if (!titleAndStatus || !titleField || !stateSelect || !controls) return;
+
+    titleAndStatus.classList.add('slb-native-header-main');
+    controls.classList.add('slb-native-header-controls');
+    titleField.classList.add('slb-header-field', 'slb-title-field');
+    titleField.prepend(createElement('small', 'slb-header-label', 'Title/Memo'));
+
+    const strategyField = createElement('div', 'slb-header-field slb-strategy-field');
+    strategyField.append(createElement('small', 'slb-header-label', 'Strategy'));
+    stateSelect.before(strategyField);
+    strategyField.append(stateSelect);
+
+    const nativeFields = [
+        ['select[name="position"]', 'slb-position-field'],
+        ['input[name="depth"]', 'slb-depth-field'],
+        ['input[name="order"]', 'slb-order-field'],
+        ['input[name="probability"]', 'slb-trigger-field'],
+    ];
+    for (const [selector, className] of nativeFields) {
+        const control = entry.querySelector(selector);
+        const field = control?.closest('.world_entry_form_control');
+        if (!field) continue;
+        field.classList.add('slb-header-field', className);
+        field.querySelector(':scope > .WIEntryHeaderTitleMobile')?.classList.add('slb-header-label');
+    }
+
+    entry.dataset.slbHeaderEnhanced = VERSION;
 }
 
 function entryData(uid) {
@@ -1022,17 +1058,27 @@ async function refreshTokenSummary(forcedData = null) {
     }
 }
 
-function scheduleTokenSummary(data = null) {
+function scheduleTokenSummary(data = null, delay = 500) {
     clearTimeout(state.tokenTimer);
-    state.tokenTimer = setTimeout(() => refreshTokenSummary(data), 500);
+    state.tokenTimer = setTimeout(() => refreshTokenSummary(data), delay);
 }
 
 function enhanceAll() {
     createAIBar();
     createWorkspace();
     rebuildNavigator();
-    renderedEntries().forEach(enhanceEntry);
+    const entries = renderedEntries();
+    entries.forEach(entry => {
+        enhanceEntryHeader(entry);
+        enhanceEntry(entry);
+    });
     syncAutoControls();
+
+    // The editor can render its selected lorebook after this extension's first
+    // token pass. Re-run once entries exist so the summary never stays at “—”.
+    if (entries.length && document.getElementById('slb-total-tokens')?.textContent === '—') {
+        scheduleTokenSummary(null, 150);
+    }
 }
 
 function scheduleEnhance() {
