@@ -1092,6 +1092,13 @@
     display: none !important;
 }
 
+#WorldInfo.slb-active .world_entry .slb-activation-overview:empty {
+    display: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+}
+
 #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field {
     display: grid !important;
     grid-template-rows: 22px 32px;
@@ -1620,5 +1627,304 @@
         min-height: 23px;
         padding: 2px 6px !important;
         font-size: 0.78em;
+    }
+}
+
+/* v1.3.15 — compact mobile editor and stable native-field placement */
+@media (max-width: 760px) {
+    #WorldInfo.slb-active #world_popup_entries_list > .world_entry {
+        margin-bottom: 5px;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-entry-header {
+        padding: 2px 0;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-title-only .slb-title-field > textarea,
+    #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-header-title-only .slb-title-field > textarea {
+        height: 29px !important;
+        min-height: 29px !important;
+        max-height: 29px !important;
+        font-size: 0.9em;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-actions .menu_button,
+    #WorldInfo.slb-active .world_entry .slb-header-toggles > * {
+        height: 29px !important;
+        min-height: 29px !important;
+    }
+
+    #WorldInfo.slb-active .slb-tabbar {
+        gap: 2px;
+        margin: 2px 0 6px;
+        padding-bottom: 2px;
+    }
+
+    #WorldInfo.slb-active .slb-tab {
+        padding: 4px 5px;
+        font-size: 0.84em;
+        line-height: 1.1;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview {
+        grid-template-columns: 62px minmax(112px, 1fr) 58px;
+        grid-template-rows: repeat(2, 47px);
+        gap: 5px;
+        margin-bottom: 6px;
+        padding-bottom: 6px;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field,
+    #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-header-field {
+        grid-template-rows: 17px 29px;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-label {
+        height: 17px;
+        min-height: 17px;
+        font-size: 0.72em;
+        line-height: 1;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview select,
+    #WorldInfo.slb-active .world_entry .slb-activation-overview input {
+        height: 29px !important;
+        min-height: 29px !important;
+        max-height: 29px !important;
+        padding-block: 1px !important;
+        font-size: 0.84em;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field,
+    #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-trigger-field {
+        width: 92px !important;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-assistant {
+        margin-bottom: 6px;
+        padding: 7px;
+        border-radius: 7px;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-head {
+        gap: 6px;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-title {
+        gap: 4px;
+        font-size: 0.9em;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-head > .menu_button {
+        inline-size: 118px !important;
+        min-inline-size: 118px !important;
+        max-inline-size: 118px !important;
+        min-height: 28px !important;
+        padding: 2px 6px !important;
+        font-size: 0.8em;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-help,
+    #WorldInfo.slb-active .slb-keyword-status {
+        margin-top: 3px;
+        font-size: 0.76em;
+        line-height: 1.25;
+    }
+
+    #WorldInfo.slb-active .slb-activation-native {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 6px !important;
+        width: 100% !important;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-grid {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) 84px minmax(0, 1fr);
+        gap: 5px !important;
+        align-items: end !important;
+        width: 100% !important;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-grid > .slb-keyword-core-field {
+        display: flex !important;
+        flex-direction: column !important;
+        min-width: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-grid > .slb-keyword-core-field > small {
+        min-height: 17px;
+        margin: 0 !important;
+        font-size: 0.72em;
+        line-height: 1;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-grid select[name="entryLogicType"] {
+        width: 100% !important;
+        height: 29px !important;
+        min-height: 29px !important;
+        margin: 0 !important;
+        padding-block: 1px !important;
+        font-size: 0.8em;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-grid textarea[name="key"],
+    #WorldInfo.slb-active .slb-keyword-grid textarea[name="keysecondary"] {
+        box-sizing: border-box;
+        width: 100% !important;
+        height: 64px !important;
+        min-height: 64px !important;
+        max-height: 64px !important;
+        margin: 0 !important;
+        padding: 4px !important;
+        font-size: 0.82em;
+        line-height: 1.25;
+    }
+
+    #WorldInfo.slb-active .slb-keyword-grid .select2-container,
+    #WorldInfo.slb-active .slb-keyword-grid .select2-selection--multiple {
+        box-sizing: border-box;
+        width: 100% !important;
+        min-width: 0 !important;
+        min-height: 42px !important;
+        margin: 0 !important;
+    }
+
+    #WorldInfo.slb-active .slb-overrides-grid {
+        display: grid !important;
+        grid-template-columns: 58px repeat(3, minmax(0, 1fr)) 76px;
+        grid-auto-rows: minmax(46px, auto);
+        gap: 5px 4px !important;
+        align-items: end !important;
+        width: 100% !important;
+    }
+
+    #WorldInfo.slb-active .slb-overrides-grid > .slb-override-field {
+        display: grid;
+        box-sizing: border-box;
+        grid-template-rows: 17px 29px;
+        min-width: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        align-self: end;
+    }
+
+    #WorldInfo.slb-active .slb-overrides-grid > .slb-override-field > small {
+        box-sizing: border-box;
+        min-width: 0;
+        min-height: 17px;
+        margin: 0 !important;
+        overflow: hidden;
+        font-size: 0.68em;
+        line-height: 1;
+        text-align: center;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    #WorldInfo.slb-active .slb-overrides-grid > .slb-override-field input,
+    #WorldInfo.slb-active .slb-overrides-grid > .slb-override-field select {
+        box-sizing: border-box;
+        width: 100% !important;
+        min-width: 0 !important;
+        height: 29px !important;
+        min-height: 29px !important;
+        max-height: 29px !important;
+        margin: 0 !important;
+        padding: 1px 5px !important;
+        overflow: hidden;
+        font-size: 0.76em;
+        text-overflow: ellipsis;
+    }
+
+    #WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="scanDepth"] {
+        grid-column: 1;
+        grid-row: 1;
+    }
+
+    #WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="caseSensitive"] {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    #WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="matchWholeWords"] {
+        grid-column: 3;
+        grid-row: 1;
+    }
+
+    #WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="useGroupScoring"] {
+        grid-column: 4;
+        grid-row: 1;
+    }
+
+    #WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="automationId"] {
+        grid-column: 5;
+        grid-row: 1;
+    }
+
+    #WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="delayUntilRecursionLevel"] {
+        grid-column: 1;
+        grid-row: 2;
+    }
+
+    #WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="outletName"] {
+        grid-column: 2 / -1;
+        grid-row: 2;
+    }
+
+    #WorldInfo.slb-active .slb-group-grid {
+        gap: 6px !important;
+    }
+
+    #WorldInfo.slb-active .slb-group-grid > .slb-group-field {
+        grid-template-rows: minmax(22px, auto) 29px;
+    }
+
+    #WorldInfo.slb-active .slb-group-grid > .slb-group-field > :first-child {
+        min-height: 22px;
+        margin-bottom: 2px !important;
+        font-size: 0.76em;
+        line-height: 1.05;
+    }
+
+    #WorldInfo.slb-active .slb-group-grid input[name="group"],
+    #WorldInfo.slb-active .slb-group-grid input[name="groupWeight"],
+    #WorldInfo.slb-active .slb-group-grid input[name="sticky"],
+    #WorldInfo.slb-active .slb-group-grid input[name="cooldown"],
+    #WorldInfo.slb-active .slb-group-grid input[name="delay"] {
+        height: 29px !important;
+        min-height: 29px !important;
+        max-height: 29px !important;
+        padding-block: 1px !important;
+        font-size: 0.82em;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid {
+        gap: 6px !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid > .slb-filter-column {
+        grid-template-rows: 38px auto;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid > .slb-filter-column > :first-child {
+        min-height: 38px;
+        font-size: 0.76em;
+        line-height: 1.1;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .select2-selection--multiple {
+        min-height: 29px !important;
+        font-size: 0.82em;
+    }
+
+    #WorldInfo.slb-active .slb-entry-meta,
+    #WorldInfo.slb-active .slb-panel[data-panel="activation"] .checkbox,
+    #WorldInfo.slb-active .slb-panel[data-panel="filter"] .checkbox {
+        font-size: 0.8em;
+        line-height: 1.2;
     }
 }

@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.14';
+const VERSION = '1.3.15';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -1222,6 +1222,28 @@ function observeResponsiveHeader(entry) {
     }
 }
 
+function ensureNativeHeaderField(entry, selector, className, fallbackLabel) {
+    const control = entry.querySelector(selector);
+    if (!control) return null;
+
+    let field = control.closest('.world_entry_form_control');
+    if (!field || !entry.contains(field)) {
+        field = createElement('div', 'world_entry_form_control');
+        control.before(field);
+        field.append(control);
+    }
+
+    field.classList.add('slb-header-field', className);
+    let label = field.querySelector(':scope > .WIEntryHeaderTitleMobile, :scope > label, :scope > small');
+    if (!label) {
+        label = createElement('small', 'slb-header-label', fallbackLabel);
+        field.prepend(label);
+    } else {
+        label.classList.add('slb-header-label');
+    }
+    return field;
+}
+
 function enhanceEntryHeader(entry) {
     if (!entry) return;
     if (entry.dataset.slbHeaderEnhanced === VERSION) {
@@ -1230,13 +1252,32 @@ function enhanceEntryHeader(entry) {
         return;
     }
 
-    const header = entry.querySelector('.inline-drawer-header');
-    const thinControls = header?.querySelector(':scope > .world_entry_thin_controls');
-    const titleAndStatus = entry.querySelector('.WIEntryTitleAndStatus');
-    const titleField = titleAndStatus?.querySelector(':scope > .flex-container.flex1');
-    const stateSelect = titleAndStatus?.querySelector(':scope > select[name="entryStateSelector"]');
-    const controls = entry.querySelector('.WIEnteryHeaderControls');
-    if (!header || !thinControls || !titleAndStatus || !titleField || !stateSelect || !controls) return;
+    const stateSelect = entry.querySelector('select[name="entryStateSelector"]');
+    const titleControl = entry.querySelector('textarea[name="comment"]');
+    const titleAndStatus = entry.querySelector('.WIEntryTitleAndStatus')
+        || stateSelect?.parentElement
+        || titleControl?.parentElement?.parentElement;
+    const header = titleAndStatus?.closest('.inline-drawer-header')
+        || entry.querySelector('.inline-drawer-header');
+    const thinControls = titleAndStatus?.closest('.world_entry_thin_controls')
+        || header?.querySelector('.world_entry_thin_controls');
+    const titleField = titleAndStatus?.querySelector(':scope > .flex-container.flex1')
+        || titleControl?.closest('.world_entry_form_control')
+        || titleControl?.parentElement;
+    if (!header || !titleField || !stateSelect || !titleControl) {
+        const missing = [
+            !header && 'header',
+            !titleControl && 'comment',
+            !titleField && 'title-field',
+            !stateSelect && 'entryStateSelector',
+        ].filter(Boolean).join(',');
+        if (entry.dataset.slbHeaderWarning !== missing) {
+            entry.dataset.slbHeaderWarning = missing;
+            console.warn(`[로어북 매니저] 항목 헤더 호환성 복구 대기 · UID ${getUid(entry) || '?'} · 누락: ${missing}`);
+        }
+        return;
+    }
+    delete entry.dataset.slbHeaderWarning;
 
     titleField.classList.add('slb-header-field', 'slb-title-field');
     titleField.prepend(createElement('small', 'slb-header-label', 'Title/Memo'));
@@ -1246,37 +1287,30 @@ function enhanceEntryHeader(entry) {
     stateSelect.before(strategyField);
     strategyField.append(stateSelect);
 
-    const nativeFields = [
-        ['select[name="position"]', 'slb-position-field'],
-        ['input[name="depth"]', 'slb-depth-field'],
-        ['input[name="order"]', 'slb-order-field'],
-        ['input[name="probability"]', 'slb-trigger-field'],
-    ];
-    for (const [selector, className] of nativeFields) {
-        const control = entry.querySelector(selector);
-        const field = control?.closest('.world_entry_form_control');
-        if (!field) continue;
-        field.classList.add('slb-header-field', className);
-        field.querySelector(':scope > .WIEntryHeaderTitleMobile')?.classList.add('slb-header-label');
-    }
+    const positionField = ensureNativeHeaderField(entry, 'select[name="position"]', 'slb-position-field', '위치');
+    const depthField = ensureNativeHeaderField(entry, 'input[name="depth"]', 'slb-depth-field', '깊이');
+    const orderField = ensureNativeHeaderField(entry, 'input[name="order"]', 'slb-order-field', '순서');
+    const triggerField = ensureNativeHeaderField(entry, 'input[name="probability"]', 'slb-trigger-field', '발동 확률 %');
 
     const shell = createElement('div', 'slb-entry-header-shell');
     const toggles = createElement('div', 'slb-header-toggles');
     const fields = createElement('div', 'slb-header-grid');
     const actions = createElement('div', 'slb-header-actions');
     const dragHandle = header.querySelector(':scope > .drag-handle');
-    const drawerToggle = thinControls.querySelector(':scope > .inline-drawer-toggle');
-    const killSwitch = thinControls.querySelector(':scope > [name="entryKillSwitch"]');
+    const drawerToggle = thinControls?.querySelector('.inline-drawer-toggle')
+        || header.querySelector('.inline-drawer-toggle');
+    const killSwitch = thinControls?.querySelector('[name="entryKillSwitch"]')
+        || header.querySelector('[name="entryKillSwitch"]');
     killSwitch?.addEventListener('click', () => setTimeout(() => syncEntryActiveState(entry), 0));
     toggles.append(...[dragHandle, drawerToggle, killSwitch].filter(Boolean));
 
     const deferredFields = createElement('div', 'slb-deferred-header-fields');
     deferredFields.append(...[
         strategyField,
-        entry.querySelector('.slb-position-field'),
-        entry.querySelector('.slb-depth-field'),
-        entry.querySelector('.slb-order-field'),
-        entry.querySelector('.slb-trigger-field'),
+        positionField,
+        depthField,
+        orderField,
+        triggerField,
     ].filter(Boolean));
     fields.append(titleField);
 
@@ -1285,7 +1319,7 @@ function enhanceEntryHeader(entry) {
     shell.append(toggles, fields, actions, deferredFields);
     header.classList.add('slb-entry-header');
     header.append(shell);
-    thinControls.remove();
+    thinControls?.remove();
 
     entry.dataset.slbHeaderEnhanced = VERSION;
     observeResponsiveHeader(entry);
@@ -1356,6 +1390,11 @@ function placeResponsiveHeaderFields(entry) {
         entry.querySelector('.slb-order-field'),
         entry.querySelector('.slb-trigger-field'),
     ].filter(Boolean);
+    if (!fields.length) {
+        if (overview) overview.hidden = true;
+        entry.classList.remove('slb-compact-entry');
+        return;
+    }
     const compact = shouldUseCompactHeader(entry);
     const target = compact ? (overview || stash) : grid;
     if (fields.some(field => field.parentElement !== target)) target.append(...fields);
@@ -1881,6 +1920,23 @@ function enhanceEntry(entry) {
     if (recursionMeta) entryMeta.append(recursionMeta);
 
     const activationContainer = contentBlock.parentElement;
+    activationContainer?.classList.add('slb-activation-native');
+    const keywordsBlock = edit.querySelector('[name="keywordsAndLogicBlock"]');
+    const overridesBlock = edit.querySelector('[name="perEntryOverridesBlock"]');
+    if (keywordsBlock) {
+        keywordsBlock.classList.add('slb-keyword-grid');
+        Array.from(keywordsBlock.children).forEach((field, index) => {
+            field.classList.add('slb-keyword-core-field', `slb-keyword-core-field-${index + 1}`);
+        });
+    }
+    if (overridesBlock) {
+        overridesBlock.classList.add('slb-overrides-grid');
+        Array.from(overridesBlock.children).forEach(field => {
+            const control = field.querySelector('[name]');
+            field.classList.add('slb-override-field');
+            if (control?.name) field.dataset.slbField = control.name;
+        });
+    }
     const commentContainer = activationContainer?.querySelector(':scope > .commentContainer');
     const groupRow = edit.querySelector('input[name="group"]')?.closest('.flex-container.wide100p.flexGap10');
     const filterRow = edit.querySelector('select[name="characterFilter"]')?.closest('.flex-container.wide100p.flexGap10');
