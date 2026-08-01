@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.2';
+const VERSION = '1.3.3';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)';
@@ -236,16 +236,16 @@ async function translateText(source) {
     }
     const language = settings.language;
     const customPrompt = settings.translationPrompt?.trim();
-    const instruction = customPrompt
-        ? customPrompt.replaceAll('{{language}}', language)
-        : `Translate the lorebook entry below into ${language}.`;
     const prompt = [
-        instruction,
+        `Translate the lorebook entry below into ${language}.`,
+        // 사용자 추가 지시문 — 번역 언어는 위 기본 지시가 자동으로 지정하므로
+        // 여기에는 문체·존칭·용어 같은 요구사항만 들어간다.
+        customPrompt || null,
         protectedTextRules(),
         '',
         '=== SOURCE ===',
         source,
-    ].join('\n');
+    ].filter(part => part !== null).join('\n');
     return requestWithProfile(prompt);
 }
 
@@ -483,8 +483,8 @@ function createAIBar() {
                     </select></label>
                     <button type="button" id="slb-test-profile" class="menu_button"><i class="fa-solid fa-plug-circle-check"></i> 연결 테스트</button>
                 </div>
-                <label class="slb-field slb-prompt-field"><small>번역 프롬프트 · AI 프로필 모드에서만 적용</small>
-                    <textarea id="slb-translate-prompt" class="text_pole" rows="3" placeholder="비워두면 기본 프롬프트를 사용합니다. {{language}}는 번역 언어로 치환됩니다. 구글 번역은 기계번역이라 프롬프트가 적용되지 않습니다."></textarea>
+                <label class="slb-field slb-prompt-field"><small>번역 추가 지시문 · AI 프로필 모드에서만 적용</small>
+                    <textarea id="slb-translate-prompt" class="text_pole" rows="3" placeholder="번역 언어는 위 설정을 자동으로 따릅니다. 문체·존칭·용어 같은 추가 요구사항만 적어주세요. 예) 대사는 반말로, 지문은 건조한 문어체로. (구글 번역에는 적용되지 않습니다)"></textarea>
                 </label>
                 <div class="slb-ai-options">
                     <label><input type="checkbox" id="slb-translate-missing"> 번역본 없는 항목을 열 때 자동 번역</label>
