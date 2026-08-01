@@ -279,11 +279,35 @@
 }
 
 #WorldInfo.slb-active .world_entry .slb-header-grid {
-    display: grid !important;
+    display: flex !important;
+    flex-flow: row wrap !important;
     min-width: 0;
-    grid-template-columns: minmax(60px, 1fr) 82px minmax(120px, 145px) 64px 64px 90px;
-    gap: 8px;
-    align-items: end;
+    gap: 6px 8px;
+    align-items: flex-end;
+}
+
+/* 좁은 패널에서는 필드가 다음 줄로 감겨서 액션 버튼과 절대 겹치지 않는다. */
+#WorldInfo.slb-active .world_entry .slb-title-field {
+    flex: 1 1 150px;
+    min-width: 120px;
+}
+
+#WorldInfo.slb-active .world_entry .slb-strategy-field {
+    flex: 0 0 82px;
+}
+
+#WorldInfo.slb-active .world_entry .slb-position-field {
+    flex: 0 1 145px;
+    min-width: 118px;
+}
+
+#WorldInfo.slb-active .world_entry .slb-depth-field,
+#WorldInfo.slb-active .world_entry .slb-order-field {
+    flex: 0 0 64px;
+}
+
+#WorldInfo.slb-active .world_entry .slb-trigger-field {
+    flex: 0 0 90px;
 }
 
 #WorldInfo.slb-active .world_entry .slb-header-field {
@@ -738,6 +762,7 @@
     }
 
     #WorldInfo.slb-active .world_entry .slb-header-grid {
+        display: grid !important;
         grid-column: 1 / -1;
         grid-row: 2;
         grid-template-columns: repeat(6, minmax(0, 1fr));
