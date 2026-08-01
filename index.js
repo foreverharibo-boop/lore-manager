@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.15';
+const VERSION = '1.3.16';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -1222,8 +1222,72 @@ function observeResponsiveHeader(entry) {
     }
 }
 
-function ensureNativeHeaderField(entry, selector, className, fallbackLabel) {
-    const control = entry.querySelector(selector);
+function queryCompatible(root, selectors) {
+    if (!root) return null;
+    for (const selector of Array.isArray(selectors) ? selectors : [selectors]) {
+        if (!selector) continue;
+        try {
+            const match = root.querySelector(selector);
+            if (match) return match;
+        } catch {
+            // A selector supplied for a newer SillyTavern build may be unsupported by an older WebView.
+        }
+    }
+    return null;
+}
+
+function normalizeFieldLabel(value) {
+    return String(value || '')
+        .toLocaleLowerCase()
+        .replace(/[\s:：%·._/()-]+/g, '');
+}
+
+function findControlByStructure(root, labels, controlSelector) {
+    if (!root) return null;
+    const normalizedLabels = labels.map(normalizeFieldLabel).filter(Boolean);
+    if (!normalizedLabels.length) return null;
+
+    const containers = root.querySelectorAll([
+        '.world_entry_form_control',
+        '.WIEntryHeaderControl',
+        '.WIEnteryHeaderControl',
+        '[name$="Block"]',
+        '[data-field]',
+    ].join(','));
+
+    for (const container of containers) {
+        const control = queryCompatible(container, [
+            `:scope > ${controlSelector}`,
+            controlSelector,
+        ]);
+        if (!control) continue;
+
+        const labelParts = Array.from(container.querySelectorAll('label, small, [data-i18n], [title]'))
+            .flatMap(element => [element.textContent, element.getAttribute('data-i18n'), element.getAttribute('title')]);
+        const haystack = normalizeFieldLabel(labelParts.join(' '));
+        if (normalizedLabels.some(label => haystack.includes(label))) return control;
+    }
+    return null;
+}
+
+function findCompatibleControl(root, { names = [], classes = [], blocks = [], labels = [], control = 'input, select, textarea' }) {
+    const byName = queryCompatible(root, names.map(name => `[name="${name}"]`));
+    if (byName) return byName;
+
+    const byClass = queryCompatible(root, classes);
+    if (byClass) return byClass.matches?.(control) ? byClass : queryCompatible(byClass, control);
+
+    for (const blockSelector of blocks) {
+        const block = queryCompatible(root, blockSelector);
+        const blockControl = queryCompatible(block, control);
+        if (blockControl) return blockControl;
+    }
+
+    return findControlByStructure(root, labels, control);
+}
+
+function ensureNativeHeaderField(entry, config, className, fallbackLabel) {
+    const control = findCompatibleControl(entry, config);
     if (!control) return null;
 
     let field = control.closest('.world_entry_form_control');
@@ -1252,16 +1316,33 @@ function enhanceEntryHeader(entry) {
         return;
     }
 
-    const stateSelect = entry.querySelector('select[name="entryStateSelector"]');
-    const titleControl = entry.querySelector('textarea[name="comment"]');
-    const titleAndStatus = entry.querySelector('.WIEntryTitleAndStatus')
+    const stateSelect = findCompatibleControl(entry, {
+        names: ['entryStateSelector', 'entryStatus', 'entryState'],
+        classes: ['select.WIEntryStatusSelect', 'select.world_entry_state', 'select.entryStateSelector'],
+        blocks: ['.WIEntryTitleAndStatus', '.WIEntryTitleStatus', '.world_entry_title_and_status', '[data-role="entry-title-status"]'],
+        labels: ['WI Entry Status', 'Entry Status', '주입 방식', '상태'],
+        control: 'select',
+    });
+    const titleControl = findCompatibleControl(entry, {
+        names: ['comment', 'entryComment', 'memo'],
+        classes: ['textarea.WIEntryTitle', 'textarea.world_entry_comment', 'textarea.entry-title'],
+        blocks: ['.WIEntryTitleAndStatus', '.WIEntryTitleStatus', '.world_entry_title_and_status', '[data-role="entry-title-status"]'],
+        labels: ['Title/Memo', 'Entry Title', 'Memo', '제목'],
+        control: 'textarea, input[type="text"]',
+    });
+    const titleAndStatus = queryCompatible(entry, [
+        '.WIEntryTitleAndStatus',
+        '.WIEntryTitleStatus',
+        '.world_entry_title_and_status',
+        '[data-role="entry-title-status"]',
+    ])
         || stateSelect?.parentElement
         || titleControl?.parentElement?.parentElement;
     const header = titleAndStatus?.closest('.inline-drawer-header')
-        || entry.querySelector('.inline-drawer-header');
+        || queryCompatible(entry, ['.inline-drawer-header', '.world_entry_header', '.world-entry-header', '[data-role="entry-header"]']);
     const thinControls = titleAndStatus?.closest('.world_entry_thin_controls')
-        || header?.querySelector('.world_entry_thin_controls');
-    const titleField = titleAndStatus?.querySelector(':scope > .flex-container.flex1')
+        || queryCompatible(header, ['.world_entry_thin_controls', '.WIEnteryHeaderControls', '.WIEntryHeaderControls', '.world-entry-header-controls']);
+    const titleField = queryCompatible(titleAndStatus, [':scope > .flex-container.flex1', ':scope > .world_entry_form_control', '.WIEntryTitleField', '.world-entry-title-field'])
         || titleControl?.closest('.world_entry_form_control')
         || titleControl?.parentElement;
     if (!header || !titleField || !stateSelect || !titleControl) {
@@ -1287,20 +1368,44 @@ function enhanceEntryHeader(entry) {
     stateSelect.before(strategyField);
     strategyField.append(stateSelect);
 
-    const positionField = ensureNativeHeaderField(entry, 'select[name="position"]', 'slb-position-field', '위치');
-    const depthField = ensureNativeHeaderField(entry, 'input[name="depth"]', 'slb-depth-field', '깊이');
-    const orderField = ensureNativeHeaderField(entry, 'input[name="order"]', 'slb-order-field', '순서');
-    const triggerField = ensureNativeHeaderField(entry, 'input[name="probability"]', 'slb-trigger-field', '발동 확률 %');
+    const positionField = ensureNativeHeaderField(entry, {
+        names: ['position', 'entryPosition'],
+        classes: ['select.world_entry_position', 'select.WIEntryPosition', 'select.entry-position'],
+        blocks: ['[name="PositionBlock"]', '.WIEntryPositionBlock', '.world_entry_position_block'],
+        labels: ['Position', '위치'],
+        control: 'select',
+    }, 'slb-position-field', '위치');
+    const depthField = ensureNativeHeaderField(entry, {
+        names: ['depth', 'entryDepth'],
+        classes: ['input.world_entry_depth', 'input.WIEntryDepth', 'input.entry-depth'],
+        blocks: ['[name="DepthBlock"]', '.WIEntryDepthBlock', '.world_entry_depth_block'],
+        labels: ['Depth', '깊이'],
+        control: 'input',
+    }, 'slb-depth-field', '깊이');
+    const orderField = ensureNativeHeaderField(entry, {
+        names: ['order', 'entryOrder'],
+        classes: ['input.world_entry_order', 'input.WIEntryOrder', 'input.entry-order'],
+        blocks: ['[name="OrderBlock"]', '.WIEntryOrderBlock', '.world_entry_order_block'],
+        labels: ['Order', '순서'],
+        control: 'input',
+    }, 'slb-order-field', '순서');
+    const triggerField = ensureNativeHeaderField(entry, {
+        names: ['probability', 'triggerPercent', 'activationPercent'],
+        classes: ['input.world_entry_probability', 'input.WIEntryProbability', 'input.entry-probability'],
+        blocks: ['[name="ProbabilityBlock"]', '.WIEntryProbabilityBlock', '.world_entry_probability_block'],
+        labels: ['Trigger %', 'Probability', 'Activation Percent', '발동 확률'],
+        control: 'input',
+    }, 'slb-trigger-field', '발동 확률 %');
 
     const shell = createElement('div', 'slb-entry-header-shell');
     const toggles = createElement('div', 'slb-header-toggles');
     const fields = createElement('div', 'slb-header-grid');
     const actions = createElement('div', 'slb-header-actions');
     const dragHandle = header.querySelector(':scope > .drag-handle');
-    const drawerToggle = thinControls?.querySelector('.inline-drawer-toggle')
-        || header.querySelector('.inline-drawer-toggle');
-    const killSwitch = thinControls?.querySelector('[name="entryKillSwitch"]')
-        || header.querySelector('[name="entryKillSwitch"]');
+    const drawerToggle = queryCompatible(thinControls, ['.inline-drawer-toggle', '.world_entry_drawer_toggle', '[data-action="toggle-entry"]'])
+        || queryCompatible(header, ['.inline-drawer-toggle', '.world_entry_drawer_toggle', '[data-action="toggle-entry"]']);
+    const killSwitch = queryCompatible(thinControls, ['[name="entryKillSwitch"]', '.killSwitch', '.world_entry_kill_switch', '[data-action="toggle-active"]'])
+        || queryCompatible(header, ['[name="entryKillSwitch"]', '.killSwitch', '.world_entry_kill_switch', '[data-action="toggle-active"]']);
     killSwitch?.addEventListener('click', () => setTimeout(() => syncEntryActiveState(entry), 0));
     toggles.append(...[dragHandle, drawerToggle, killSwitch].filter(Boolean));
 
@@ -1865,11 +1970,22 @@ function createTab(name, label) {
 
 function enhanceEntry(entry) {
     if (!entry) return;
-    const edit = entry.querySelector('.world_entry_edit');
+    const edit = queryCompatible(entry, ['.world_entry_edit', '.world-entry-edit', '[data-role="entry-editor"]']);
     if (!edit || edit.dataset.slbEnhanced === VERSION) return;
 
-    const contentBlock = edit.querySelector('[name="contentAndCharFilterBlock"]');
-    const source = contentBlock?.querySelector('textarea[name="content"]');
+    const source = findCompatibleControl(edit, {
+        names: ['content', 'entryContent'],
+        classes: ['textarea.world_entry_content', 'textarea.WIEntryContent', 'textarea.entry-content'],
+        blocks: ['[name="contentAndCharFilterBlock"]', '.contentAndCharFilterBlock', '.world_entry_content_filter_block'],
+        labels: ['Content', '원문'],
+        control: 'textarea',
+    });
+    const contentBlock = queryCompatible(edit, [
+        '[name="contentAndCharFilterBlock"]',
+        '.contentAndCharFilterBlock',
+        '.world_entry_content_filter_block',
+        '[data-role="entry-content-block"]',
+    ]) || source?.closest('.world_entry_thin_controls, .world_entry_content_filter_block, [data-role="entry-content-block"]');
     const sourcePane = source?.closest('.world_entry_form_control');
     if (!contentBlock || !source || !sourcePane) return;
 
@@ -1921,8 +2037,28 @@ function enhanceEntry(entry) {
 
     const activationContainer = contentBlock.parentElement;
     activationContainer?.classList.add('slb-activation-native');
-    const keywordsBlock = edit.querySelector('[name="keywordsAndLogicBlock"]');
-    const overridesBlock = edit.querySelector('[name="perEntryOverridesBlock"]');
+    const keywordsBlock = queryCompatible(edit, [
+        '[name="keywordsAndLogicBlock"]',
+        '.keywordsAndLogicBlock',
+        '.world_entry_keywords_logic_block',
+        '[data-role="keywords-logic"]',
+    ]) || findCompatibleControl(edit, {
+        names: ['entryLogicType'],
+        classes: ['select.world_entry_logic', 'select.entry-logic'],
+        labels: ['Logic', '논리 구조'],
+        control: 'select',
+    })?.closest('.flex-container.wide100p, .world_entry_keywords_logic_block, [data-role="keywords-logic"]');
+    const overridesBlock = queryCompatible(edit, [
+        '[name="perEntryOverridesBlock"]',
+        '.perEntryOverridesBlock',
+        '.world_entry_overrides_block',
+        '[data-role="entry-overrides"]',
+    ]) || findCompatibleControl(edit, {
+        names: ['scanDepth', 'automationId', 'delayUntilRecursionLevel'],
+        classes: ['.world_entry_scan_depth', '.entry-automation-id'],
+        labels: ['Scan Depth', 'Automation ID', 'Recursion Level'],
+        control: 'input, select',
+    })?.closest('.flex-container.wide100p, .world_entry_overrides_block, [data-role="entry-overrides"]');
     if (keywordsBlock) {
         keywordsBlock.classList.add('slb-keyword-grid');
         Array.from(keywordsBlock.children).forEach((field, index) => {
@@ -1935,13 +2071,34 @@ function enhanceEntry(entry) {
             const control = field.querySelector('[name]');
             field.classList.add('slb-override-field');
             if (control?.name) field.dataset.slbField = control.name;
+            const label = queryCompatible(field, [':scope > small', ':scope > label', '.world_entry_form_label']);
+            const labelText = label?.textContent?.replace(/\s+/g, ' ').trim();
+            if (label && labelText) label.title = labelText;
         });
     }
     const commentContainer = activationContainer?.querySelector(':scope > .commentContainer');
-    const groupRow = edit.querySelector('input[name="group"]')?.closest('.flex-container.wide100p.flexGap10');
-    const filterRow = edit.querySelector('select[name="characterFilter"]')?.closest('.flex-container.wide100p.flexGap10');
-    const bottomControls = edit.querySelector('[name="WIEntryBottomControls"]');
-    const matchingSources = edit.querySelector('input[name="matchCharacterDescription"]')?.closest('.inline-drawer');
+    const groupControl = findCompatibleControl(edit, {
+        names: ['group', 'entryGroup'],
+        classes: ['input.world_entry_group', 'input.entry-group'],
+        labels: ['Group', '포함 그룹'],
+        control: 'input',
+    });
+    const groupRow = groupControl?.closest('.flex-container.wide100p.flexGap10, .world_entry_group_controls, [data-role="group-controls"]');
+    const characterFilterControl = findCompatibleControl(edit, {
+        names: ['characterFilter', 'character_filter', 'entryCharacterFilter'],
+        classes: ['select.world_entry_character_filter', 'select.entry-character-filter'],
+        labels: ['Filter to Characters or Tags', 'Characters or Tags', '캐릭터', '태그'],
+        control: 'select',
+    });
+    const filterRow = characterFilterControl?.closest('.flex-container.wide100p.flexGap10, .world_entry_filter_controls, [data-role="connection-filters"]');
+    const bottomControls = queryCompatible(edit, ['[name="WIEntryBottomControls"]', '.WIEntryBottomControls', '.world_entry_bottom_controls', '[data-role="entry-bottom-controls"]']);
+    const matchingSourceControl = findCompatibleControl(edit, {
+        names: ['matchCharacterDescription', 'matchPersonaDescription'],
+        classes: ['input.world_entry_matching_source', 'input.entry-matching-source'],
+        labels: ['Additional Matching Sources', 'Matching Sources'],
+        control: 'input[type="checkbox"]',
+    });
+    const matchingSources = matchingSourceControl?.closest('.inline-drawer, .world_entry_matching_sources, [data-role="matching-sources"]');
     const activationOverview = createElement('div', 'slb-activation-overview');
     const originalChildren = Array.from(edit.children);
 
@@ -1998,7 +2155,24 @@ function enhanceEntry(entry) {
     }
     if (filterRow) {
         filterRow.classList.add('slb-filter-grid');
-        Array.from(filterRow.children).forEach(column => column.classList.add('slb-filter-column'));
+        Array.from(filterRow.children).forEach((column, index) => {
+            const control = queryCompatible(column, [
+                'select[name="characterFilter"]',
+                'select[name="character_filter"]',
+                'select[name="triggers"]',
+                'select[name="generationTriggers"]',
+                'select',
+            ]);
+            column.classList.add('slb-filter-column', `slb-filter-column-${index + 1}`);
+            if (control?.name) column.dataset.slbField = control.name;
+
+            const controlWrap = control?.closest('.range-block-range, .world_entry_filter_control, [data-role="filter-control"]');
+            controlWrap?.classList.add('slb-filter-control');
+            const header = Array.from(column.children).find(child => child !== controlWrap && child.querySelector?.('small'));
+            header?.classList.add('slb-filter-column-header');
+            queryCompatible(header, ['label[for="character_exclusion"]', '.character_exclusion', '[data-role="exclude-filter"]'])?.classList.add('slb-filter-exclude');
+            queryCompatible(header, ['input[name="__invisible"]'])?.closest('label')?.classList.add('slb-filter-placeholder');
+        });
         panels.filter.append(filterRow);
     }
     if (matchingSources) {

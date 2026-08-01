@@ -1111,7 +1111,8 @@
 }
 
 @media (max-width: 760px) {
-    #WorldInfo.slb-active .world_entry .slb-activation-overview {
+    #WorldInfo.slb-active .world_entry .slb-activation-overview,
+    #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview {
         grid-template-columns: 74px minmax(142px, 1fr) 68px;
         grid-template-rows: repeat(2, 58px);
         gap: 8px;
@@ -1630,7 +1631,7 @@
     }
 }
 
-/* v1.3.15 — compact mobile editor and stable native-field placement */
+/* v1.3.16 — dense single-row mobile controls and cross-version field recovery */
 @media (max-width: 760px) {
     #WorldInfo.slb-active #world_popup_entries_list > .world_entry {
         margin-bottom: 5px;
@@ -1661,43 +1662,76 @@
     }
 
     #WorldInfo.slb-active .slb-tab {
-        padding: 4px 5px;
-        font-size: 0.84em;
+        padding: 3px 4px;
+        font-size: 0.8em;
         line-height: 1.1;
     }
 
-    #WorldInfo.slb-active .world_entry .slb-activation-overview {
-        grid-template-columns: 62px minmax(112px, 1fr) 58px;
-        grid-template-rows: repeat(2, 47px);
-        gap: 5px;
-        margin-bottom: 6px;
-        padding-bottom: 6px;
+    #WorldInfo.slb-active .world_entry .slb-activation-overview,
+    #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview {
+        grid-template-columns: 46px minmax(92px, 1fr) 38px 44px 66px;
+        grid-template-rows: 41px;
+        gap: 3px;
+        margin-bottom: 5px;
+        padding-bottom: 5px;
+        align-items: end;
     }
 
     #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field,
     #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-header-field {
-        grid-template-rows: 17px 29px;
+        grid-template-rows: 15px 26px;
     }
 
     #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-label {
-        height: 17px;
-        min-height: 17px;
-        font-size: 0.72em;
+        box-sizing: border-box;
+        height: 15px;
+        min-height: 15px;
+        overflow: hidden;
+        font-size: 0.6em;
         line-height: 1;
+        text-overflow: clip;
+        white-space: nowrap;
     }
 
     #WorldInfo.slb-active .world_entry .slb-activation-overview select,
     #WorldInfo.slb-active .world_entry .slb-activation-overview input {
-        height: 29px !important;
-        min-height: 29px !important;
-        max-height: 29px !important;
-        padding-block: 1px !important;
-        font-size: 0.84em;
+        height: 26px !important;
+        min-height: 26px !important;
+        max-height: 26px !important;
+        padding: 1px 3px !important;
+        font-size: 0.72em;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-strategy-field,
+    #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-strategy-field {
+        grid-column: 1;
+        grid-row: 1;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-position-field,
+    #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-position-field {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field,
+    #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-depth-field {
+        grid-column: 3;
+        grid-row: 1;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field,
+    #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-order-field {
+        grid-column: 4;
+        grid-row: 1;
     }
 
     #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field,
     #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview .slb-trigger-field {
-        width: 92px !important;
+        grid-column: 5;
+        grid-row: 1;
+        width: 100% !important;
+        justify-self: stretch;
     }
 
     #WorldInfo.slb-active .slb-keyword-assistant {
@@ -1741,8 +1775,8 @@
 
     #WorldInfo.slb-active .slb-keyword-grid {
         display: grid !important;
-        grid-template-columns: minmax(0, 1fr) 84px minmax(0, 1fr);
-        gap: 5px !important;
+        grid-template-columns: minmax(0, 1fr) 70px minmax(0, 1fr);
+        gap: 4px !important;
         align-items: end !important;
         width: 100% !important;
     }
@@ -1775,9 +1809,9 @@
     #WorldInfo.slb-active .slb-keyword-grid textarea[name="keysecondary"] {
         box-sizing: border-box;
         width: 100% !important;
-        height: 64px !important;
-        min-height: 64px !important;
-        max-height: 64px !important;
+        height: 58px !important;
+        min-height: 58px !important;
+        max-height: 58px !important;
         margin: 0 !important;
         padding: 4px !important;
         font-size: 0.82em;
@@ -1795,9 +1829,9 @@
 
     #WorldInfo.slb-active .slb-overrides-grid {
         display: grid !important;
-        grid-template-columns: 58px repeat(3, minmax(0, 1fr)) 76px;
-        grid-auto-rows: minmax(46px, auto);
-        gap: 5px 4px !important;
+        grid-template-columns: 50px repeat(3, minmax(0, 1fr)) 66px;
+        grid-auto-rows: 42px;
+        gap: 4px !important;
         align-items: end !important;
         width: 100% !important;
     }
@@ -1805,7 +1839,7 @@
     #WorldInfo.slb-active .slb-overrides-grid > .slb-override-field {
         display: grid;
         box-sizing: border-box;
-        grid-template-rows: 17px 29px;
+        grid-template-rows: 15px 27px;
         min-width: 0 !important;
         width: 100% !important;
         margin: 0 !important;
@@ -1815,10 +1849,10 @@
     #WorldInfo.slb-active .slb-overrides-grid > .slb-override-field > small {
         box-sizing: border-box;
         min-width: 0;
-        min-height: 17px;
+        min-height: 15px;
         margin: 0 !important;
         overflow: hidden;
-        font-size: 0.68em;
+        font-size: 0.61em;
         line-height: 1;
         text-align: center;
         text-overflow: ellipsis;
@@ -1830,13 +1864,13 @@
         box-sizing: border-box;
         width: 100% !important;
         min-width: 0 !important;
-        height: 29px !important;
-        min-height: 29px !important;
-        max-height: 29px !important;
+        height: 27px !important;
+        min-height: 27px !important;
+        max-height: 27px !important;
         margin: 0 !important;
         padding: 1px 5px !important;
         overflow: hidden;
-        font-size: 0.76em;
+        font-size: 0.7em;
         text-overflow: ellipsis;
     }
 
@@ -1866,13 +1900,22 @@
     }
 
     #WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="delayUntilRecursionLevel"] {
-        grid-column: 1;
+        grid-column: 1 / span 2;
         grid-row: 2;
     }
 
     #WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="outletName"] {
-        grid-column: 2 / -1;
+        grid-column: 3 / span 2;
         grid-row: 2;
+        max-width: 170px;
+        justify-self: start;
+    }
+
+    #WorldInfo.slb-active .slb-overrides-grid > [data-slb-field="delayUntilRecursionLevel"] > small {
+        overflow: visible;
+        font-size: 0.64em;
+        text-overflow: clip;
+        white-space: nowrap;
     }
 
     #WorldInfo.slb-active .slb-group-grid {
@@ -1903,22 +1946,96 @@
     }
 
     #WorldInfo.slb-active .slb-filter-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
         gap: 6px !important;
+        align-items: start !important;
     }
 
     #WorldInfo.slb-active .slb-filter-grid > .slb-filter-column {
-        grid-template-rows: 38px auto;
+        display: grid !important;
+        grid-template-rows: auto auto;
+        gap: 4px;
+        align-content: start !important;
+        align-items: start !important;
+        overflow: visible !important;
     }
 
-    #WorldInfo.slb-active .slb-filter-grid > .slb-filter-column > :first-child {
-        min-height: 38px;
-        font-size: 0.76em;
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) max-content;
+        gap: 3px;
+        min-height: 31px !important;
+        margin: 0 !important;
+        align-items: end !important;
+        font-size: 0.7em;
         line-height: 1.1;
     }
 
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > small {
+        min-width: 0;
+        margin: 0 !important;
+        line-height: 1.15;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude {
+        display: inline-flex !important;
+        min-width: max-content;
+        margin: 0 !important;
+        align-items: center !important;
+        gap: 2px !important;
+        white-space: nowrap;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude input[type="checkbox"] {
+        width: 17px !important;
+        min-width: 17px !important;
+        height: 17px !important;
+        min-height: 17px !important;
+        margin: 0 !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-placeholder {
+        visibility: hidden !important;
+        width: 0 !important;
+        min-width: 0 !important;
+        margin: 0 !important;
+        overflow: hidden !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid .slb-filter-control {
+        grid-row: 2;
+        box-sizing: border-box;
+        width: 100% !important;
+        min-width: 0 !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+    }
+
+    #WorldInfo.slb-active .slb-filter-grid select[name="characterFilter"],
+    #WorldInfo.slb-active .slb-filter-grid select[name="character_filter"],
+    #WorldInfo.slb-active .slb-filter-grid select[name="triggers"],
+    #WorldInfo.slb-active .slb-filter-grid select[name="generationTriggers"] {
+        box-sizing: border-box;
+        width: 100% !important;
+        min-width: 0 !important;
+        height: 78px !important;
+        min-height: 78px !important;
+        max-height: 78px !important;
+        margin: 0 !important;
+        padding: 3px !important;
+        font-size: 0.74em;
+        line-height: 1.2;
+    }
+
     #WorldInfo.slb-active .slb-filter-grid .select2-selection--multiple {
-        min-height: 29px !important;
-        font-size: 0.82em;
+        min-height: 31px !important;
+        margin: 0 !important;
+        font-size: 0.76em;
+    }
+
+    #WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-matching-sources {
+        clear: both;
+        margin-top: 5px !important;
     }
 
     #WorldInfo.slb-active .slb-entry-meta,
