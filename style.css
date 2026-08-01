@@ -257,17 +257,20 @@
 #WorldInfo.slb-active .world_entry .slb-header-field {
     display: grid !important;
     min-width: 0;
-    grid-template-rows: minmax(18px, auto) auto;
-    min-width: 0;
-    align-items: end;
+    grid-template-rows: 22px 32px;
+    align-items: stretch;
 }
 
 #WorldInfo.slb-active .world_entry .slb-header-label,
 #WorldInfo.slb-active .world_entry .WIEntryHeaderTitleMobile.slb-header-label {
-    display: block !important;
+    display: flex !important;
     box-sizing: border-box;
     width: 100%;
-    margin: 0 0 3px;
+    height: 22px;
+    min-height: 22px;
+    margin: 0 !important;
+    align-items: center;
+    justify-content: center;
     line-height: 1.05;
     text-align: center !important;
     white-space: nowrap !important;
@@ -281,6 +284,9 @@
 #WorldInfo.slb-active .world_entry .slb-header-field > input {
     box-sizing: border-box;
     width: 100% !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
     min-width: 0 !important;
     margin-top: 0 !important;
     margin-bottom: 0 !important;
@@ -289,6 +295,12 @@
 #WorldInfo.slb-active .world_entry .slb-header-actions .menu_button,
 #WorldInfo.slb-active .world_entry .slb-header-toggles > * {
     flex: 0 0 auto;
+    display: inline-flex !important;
+    box-sizing: border-box;
+    height: 32px !important;
+    min-height: 32px !important;
+    align-items: center;
+    justify-content: center;
 }
 
 #WorldInfo.slb-active .world_entry.slb-selected > .world_entry_form {
@@ -391,8 +403,11 @@
 
 #WorldInfo.slb-active .slb-entry-editor-head {
     flex-wrap: nowrap;
-    min-height: 34px;
-    margin-bottom: 5px;
+    box-sizing: border-box;
+    height: 38px;
+    min-height: 38px;
+    max-height: 38px;
+    margin: 0 0 5px;
 }
 
 #WorldInfo.slb-active .slb-entry-editor-title {
@@ -425,6 +440,7 @@
     width: 100%;
     height: 250px;
     min-height: 250px;
+    margin: 0 !important;
     resize: vertical;
 }
 

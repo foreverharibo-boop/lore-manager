@@ -10,7 +10,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.1.3';
+const VERSION = '1.1.4';
 const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry';
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
@@ -223,7 +223,10 @@ function normalizeKeywords(items) {
         const keyword = String(item ?? '')
             .trim()
             .replace(/^(?:[-*•]\s*|\d+[.)]\s*)/, '')
-            .replace(/^["']|["']$/g, '')
+            .replace(/^\s*(?:"?keywords"?\s*:\s*)?/i, '')
+            .replace(/^[\s\[{(]+/, '')
+            .replace(/[\s\]})]+$/, '')
+            .replace(/^["'`“”‘’]+|["'`“”‘’,;]+$/g, '')
             .trim();
         if (!keyword || keyword.length > 120) continue;
         const normalized = keyword.toLocaleLowerCase();
@@ -507,7 +510,7 @@ function createWorkspace() {
         if (event.target.matches('textarea[name="content"]')) {
             scheduleEntryTokenCount(currentBookName(), uid, event.target.value);
         }
-    });
+    }, true);
 
     entries.addEventListener('click', event => {
         const killSwitch = event.target.closest('[name="entryKillSwitch"]');
@@ -615,6 +618,7 @@ function enhanceEntryHeader(entry) {
     const dragHandle = header.querySelector(':scope > .drag-handle');
     const drawerToggle = thinControls.querySelector(':scope > .inline-drawer-toggle');
     const killSwitch = thinControls.querySelector(':scope > [name="entryKillSwitch"]');
+    killSwitch?.addEventListener('click', () => setTimeout(() => syncEntryActiveState(entry), 0));
     toggles.append(...[dragHandle, drawerToggle, killSwitch].filter(Boolean));
 
     const orderedFields = [
@@ -1086,6 +1090,7 @@ function enhanceEntry(entry) {
 
     source.addEventListener('input', () => {
         if (ui.flags.writingSource) return;
+        scheduleEntryTokenCount(ui.book, ui.uid, ui.source.value);
         ui.status.textContent = '원문 변경 감지';
         if (getSettings().autoTranslateSource) scheduleSourceTranslation(ui);
     });
