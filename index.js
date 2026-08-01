@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.10';
+const VERSION = '1.3.12';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -158,9 +158,23 @@ function findTranslationRecord(book, uid, source) {
     return null;
 }
 
-function saveTranslationRecord(book, uid, source, translation) {
+function getTranslationReflectionBaseline(record, source) {
+    const sourceHash = hashText(source);
+    if (!record || record.language !== getSettings().language) return { text: '', sourceHash: '' };
+    if ('syncedText' in record || 'syncedSourceHash' in record) {
+        return record.syncedSourceHash === sourceHash
+            ? { text: String(record.syncedText ?? ''), sourceHash }
+            : { text: '', sourceHash: '' };
+    }
+    return record.sourceHash === sourceHash
+        ? { text: String(record.text ?? ''), sourceHash }
+        : { text: '', sourceHash: '' };
+}
+
+function saveTranslationRecord(book, uid, source, translation, options = {}) {
     const settings = getSettings();
-    settings.translations[translationKey(book, uid)] = {
+    const key = translationKey(book, uid);
+    const record = {
         book,
         uid: String(uid),
         language: settings.language,
@@ -168,6 +182,15 @@ function saveTranslationRecord(book, uid, source, translation) {
         text: String(translation ?? ''),
         updatedAt: Date.now(),
     };
+    const baseline = options.baseline;
+    if (!options.markSynced && baseline?.sourceHash && (
+        baseline.sourceHash !== record.sourceHash
+        || String(baseline.text ?? '') !== record.text
+    )) {
+        record.syncedText = String(baseline.text ?? '');
+        record.syncedSourceHash = String(baseline.sourceHash);
+    }
+    settings.translations[key] = record;
     saveSettingsDebounced();
 }
 
@@ -413,21 +436,207 @@ async function translateText(source, onProgress = null) {
     return requestWithProfile(prompt);
 }
 
-async function reflectTranslationInSource(source, translation) {
+function splitReflectionDocument(value) {
+    const text = String(value ?? '');
+    const segments = [];
+    const separators = [];
+    const pattern = /\r\n|\r|\n/g;
+    let cursor = 0;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+        segments.push(text.slice(cursor, match.index));
+        separators.push(match[0]);
+        cursor = match.index + match[0].length;
+    }
+    segments.push(text.slice(cursor));
+    return { segments, separators };
+}
+
+function joinReflectionDocument(segments, separators) {
+    if (!segments.length) return '';
+    let text = String(segments[0] ?? '');
+    for (let index = 1; index < segments.length; index += 1) {
+        text += separators[index - 1] ?? '\n';
+        text += String(segments[index] ?? '');
+    }
+    return text;
+}
+
+function singleReflectionChangeHunk(before, after) {
+    let prefix = 0;
+    while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1;
+    let suffix = 0;
+    while (
+        suffix < before.length - prefix
+        && suffix < after.length - prefix
+        && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+    ) suffix += 1;
+    if (prefix === before.length && prefix === after.length) return [];
+    return [{
+        oldStart: prefix,
+        oldEnd: before.length - suffix,
+        newStart: prefix,
+        newEnd: after.length - suffix,
+    }];
+}
+
+function buildReflectionChangeHunks(before, after) {
+    const oldLength = before.length;
+    const newLength = after.length;
+    if (oldLength === newLength) {
+        const hunks = [];
+        let start = -1;
+        for (let index = 0; index <= oldLength; index += 1) {
+            const changed = index < oldLength && before[index] !== after[index];
+            if (changed && start < 0) start = index;
+            if (!changed && start >= 0) {
+                hunks.push({ oldStart: start, oldEnd: index, newStart: start, newEnd: index });
+                start = -1;
+            }
+        }
+        return hunks;
+    }
+    if (oldLength * newLength > 1_000_000) return singleReflectionChangeHunk(before, after);
+
+    const matches = Array.from({ length: oldLength + 1 }, () => new Uint32Array(newLength + 1));
+    for (let oldIndex = oldLength - 1; oldIndex >= 0; oldIndex -= 1) {
+        for (let newIndex = newLength - 1; newIndex >= 0; newIndex -= 1) {
+            matches[oldIndex][newIndex] = before[oldIndex] === after[newIndex]
+                ? matches[oldIndex + 1][newIndex + 1] + 1
+                : Math.max(matches[oldIndex + 1][newIndex], matches[oldIndex][newIndex + 1]);
+        }
+    }
+
+    const hunks = [];
+    let hunk = null;
+    let oldIndex = 0;
+    let newIndex = 0;
+    const openHunk = () => {
+        if (!hunk) {
+            hunk = {
+                oldStart: oldIndex,
+                oldEnd: oldIndex,
+                newStart: newIndex,
+                newEnd: newIndex,
+            };
+        }
+    };
+    const closeHunk = () => {
+        if (hunk) hunks.push(hunk);
+        hunk = null;
+    };
+
+    while (oldIndex < oldLength || newIndex < newLength) {
+        if (oldIndex < oldLength && newIndex < newLength && before[oldIndex] === after[newIndex]) {
+            closeHunk();
+            oldIndex += 1;
+            newIndex += 1;
+            continue;
+        }
+
+        openHunk();
+        if (
+            newIndex < newLength
+            && (oldIndex === oldLength || matches[oldIndex][newIndex + 1] >= matches[oldIndex + 1][newIndex])
+        ) {
+            newIndex += 1;
+            hunk.newEnd = newIndex;
+        } else {
+            oldIndex += 1;
+            hunk.oldEnd = oldIndex;
+        }
+    }
+    closeHunk();
+    return hunks;
+}
+
+async function reflectTranslationSegmentInSource({
+    sourceSegments,
+    previousTranslationSegments,
+    editedTranslationSegments,
+    contextBefore,
+    contextAfter,
+}) {
     const language = getSettings().language;
+    const expectedSegments = editedTranslationSegments.length;
+    if (!expectedSegments) return [];
+    if (editedTranslationSegments.every(segment => !segment.trim())) return [...editedTranslationSegments];
+
     const prompt = [
-        `The ${language} translation of a lorebook entry was edited by the user.`,
-        'Update the original source only where needed so it expresses the edited translation.',
-        'Keep unchanged source wording untouched whenever possible.',
+        `The user edited ${language} translation lines from a lorebook entry.`,
+        'Return a replacement for ONLY the corresponding original-language source lines.',
+        'Do not rewrite, summarize, or return the read-only neighboring context.',
+        'Within the source segment, keep wording identical wherever the edited translation did not change its meaning.',
+        'If the current source segment is empty, translate the newly added lines into the same source language and style as the context.',
+        `Return exactly ${expectedSegments} line(s), separated only by newline characters.`,
         protectedTextRules(),
         '',
-        '=== CURRENT SOURCE ===',
-        source,
+        '=== READ-ONLY SOURCE CONTEXT BEFORE ===',
+        contextBefore || '(none)',
         '',
-        `=== EDITED ${language.toUpperCase()} TRANSLATION ===`,
-        translation,
+        '=== CURRENT SOURCE SEGMENT ===',
+        sourceSegments.join('\n') || '(empty insertion)',
+        '',
+        `=== PREVIOUS ${language.toUpperCase()} TRANSLATION SEGMENT ===`,
+        previousTranslationSegments.join('\n') || '(empty insertion)',
+        '',
+        `=== EDITED ${language.toUpperCase()} TRANSLATION SEGMENT ===`,
+        editedTranslationSegments.join('\n'),
+        '',
+        '=== READ-ONLY SOURCE CONTEXT AFTER ===',
+        contextAfter || '(none)',
     ].join('\n');
-    return requestWithProfile(prompt);
+    const revised = await requestWithProfile(prompt);
+    const revisedSegments = splitReflectionDocument(revised).segments;
+    if (revisedSegments.length !== expectedSegments) {
+        throw new Error(`AI가 수정 구간을 ${expectedSegments}줄 형식으로 반환하지 않았습니다. 원문은 변경하지 않았습니다.`);
+    }
+    return revisedSegments;
+}
+
+async function reflectTranslationChangesInSource(source, previousTranslation, editedTranslation) {
+    const sourceDocument = splitReflectionDocument(source);
+    const previousDocument = splitReflectionDocument(previousTranslation);
+    const editedDocument = splitReflectionDocument(editedTranslation);
+    if (sourceDocument.segments.length !== previousDocument.segments.length) {
+        throw new Error('원문과 이전 번역본의 줄 구성이 맞지 않아 부분 반영할 수 없습니다. 먼저 다시 번역한 뒤 수정해주세요.');
+    }
+
+    const hunks = buildReflectionChangeHunks(previousDocument.segments, editedDocument.segments);
+    if (!hunks.length) return { source, changedRegions: 0 };
+
+    const replacements = [];
+    for (const hunk of hunks) {
+        const sourceSegments = sourceDocument.segments.slice(hunk.oldStart, hunk.oldEnd);
+        const previousTranslationSegments = previousDocument.segments.slice(hunk.oldStart, hunk.oldEnd);
+        const editedTranslationSegments = editedDocument.segments.slice(hunk.newStart, hunk.newEnd);
+        const revisedSegments = editedTranslationSegments.length
+            ? await reflectTranslationSegmentInSource({
+                sourceSegments,
+                previousTranslationSegments,
+                editedTranslationSegments,
+                contextBefore: sourceDocument.segments[hunk.oldStart - 1] ?? '',
+                contextAfter: sourceDocument.segments[hunk.oldEnd] ?? '',
+            })
+            : [];
+        replacements.push({ ...hunk, revisedSegments });
+    }
+
+    const revisedSourceSegments = [...sourceDocument.segments];
+    for (const replacement of replacements.reverse()) {
+        revisedSourceSegments.splice(
+            replacement.oldStart,
+            replacement.oldEnd - replacement.oldStart,
+            ...replacement.revisedSegments,
+        );
+    }
+    if (revisedSourceSegments.length !== editedDocument.segments.length) {
+        throw new Error('부분 반영 결과의 줄 구성이 맞지 않아 원문은 변경하지 않았습니다.');
+    }
+    return {
+        source: joinReflectionDocument(revisedSourceSegments, editedDocument.separators),
+        changedRegions: hunks.length,
+    };
 }
 
 async function reviseText(text, instruction, kind) {
@@ -628,7 +837,7 @@ function createAIBar() {
                 <b><i class="fa-solid fa-book" aria-hidden="true"></i> 로어북 매니저</b>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
-            <div class="inline-drawer-content">
+            <div class="inline-drawer-content" style="display: none;">
                 <div class="slb-ai-title">
                     <span><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> 번역 · AI 도구</span>
                     <span class="slb-ai-badge">메인 연결과 독립</span>
@@ -1339,6 +1548,20 @@ function setEntryBusy(ui, busy, message = '') {
     if (message) ui.status.textContent = message;
 }
 
+function markTranslationSynced(ui, source, translation) {
+    ui.reflectionBaseline = {
+        text: String(translation ?? ''),
+        sourceHash: hashText(source),
+    };
+    saveTranslationRecord(ui.book, ui.uid, source, translation, { markSynced: true });
+}
+
+function savePendingTranslation(ui, translation) {
+    saveTranslationRecord(ui.book, ui.uid, ui.source.value, translation, {
+        baseline: ui.reflectionBaseline,
+    });
+}
+
 function updateEntrySyncMode(ui) {
     const enabled = getSettings().autoSyncToSource;
     ui.autoSync.checked = enabled;
@@ -1389,7 +1612,7 @@ async function translateEntrySource(ui, force = false, background = false) {
         ui.flags.writingTranslation = true;
         ui.translation.value = translated;
         ui.flags.writingTranslation = false;
-        saveTranslationRecord(ui.book, ui.uid, source, translated);
+        markTranslationSynced(ui, source, translated);
         ui.status.textContent = '현재 원문을 기준으로 번역되었습니다.';
     } catch (error) {
         ui.status.textContent = error.message || '번역에 실패했습니다.';
@@ -1410,21 +1633,30 @@ async function reflectEntryTranslation(ui) {
         ui.status.textContent = '원문 반영은 AI 기능이라 전용 연결 프로필이 필요합니다. (구글 번역은 번역에만 사용됩니다.)';
         return;
     }
+    const baseline = ui.reflectionBaseline;
+    if (!baseline?.text || baseline.sourceHash !== hashText(source)) {
+        ui.status.textContent = '부분 반영 기준이 없습니다. 먼저 다시 번역한 뒤 번역본을 수정해주세요.';
+        return;
+    }
 
     ui.flags.translating = true;
-    setEntryBusy(ui, true, '번역 변경사항을 원문에 반영하는 중…');
+    setEntryBusy(ui, true, '수정된 번역 구간만 원문에 반영하는 중…');
     try {
-        const revisedSource = await reflectTranslationInSource(source, translation);
+        const result = await reflectTranslationChangesInSource(source, baseline.text, translation);
         if (ui.translation.value !== translation || ui.source.value !== source) {
             ui.status.textContent = '반영 중 내용이 다시 변경되어 이전 결과를 적용하지 않았습니다.';
             return;
         }
+        if (!result.changedRegions) {
+            ui.status.textContent = '이전 번역본과 달라진 부분이 없습니다.';
+            return;
+        }
         ui.flags.writingSource = true;
-        ui.source.value = revisedSource;
+        ui.source.value = result.source;
         ui.source.dispatchEvent(new Event('input', { bubbles: true }));
         ui.flags.writingSource = false;
-        saveTranslationRecord(ui.book, ui.uid, revisedSource, translation);
-        ui.status.textContent = '번역 변경사항이 원문에 반영되었습니다.';
+        markTranslationSynced(ui, result.source, translation);
+        ui.status.textContent = `수정된 ${result.changedRegions}개 구간만 원문에 반영되었습니다.`;
     } catch (error) {
         ui.status.textContent = error.message || '원문 반영에 실패했습니다.';
         notify(ui.status.textContent, 'error');
@@ -1461,7 +1693,7 @@ async function runTranslationRevision(ui) {
     try {
         const revised = await reviseText(ui.translation.value, instruction.trim(), 'translation');
         ui.translation.value = revised;
-        saveTranslationRecord(ui.book, ui.uid, ui.source.value, revised);
+        savePendingTranslation(ui, revised);
         ui.status.textContent = 'AI 번역 수정이 반영되었습니다.';
         if (getSettings().autoSyncToSource) scheduleTranslationReflection(ui);
     } catch (error) {
@@ -1652,6 +1884,7 @@ function enhanceEntry(entry) {
         status: syncStatus,
         autoSync,
         applyButton,
+        reflectionBaseline: getTranslationReflectionBaseline(record, source.value),
         flags: { writingSource: false, writingTranslation: false, translating: false },
     };
 
@@ -1693,7 +1926,7 @@ function enhanceEntry(entry) {
     });
     translation.addEventListener('input', () => {
         if (ui.flags.writingTranslation) return;
-        saveTranslationRecord(ui.book, ui.uid, ui.source.value, ui.translation.value);
+        savePendingTranslation(ui, ui.translation.value);
         ui.status.textContent = getSettings().autoSyncToSource ? '번역 변경 감지 · 원문 반영 대기 중' : '번역 변경 감지 · 수동 반영 필요';
         if (getSettings().autoSyncToSource) scheduleTranslationReflection(ui);
     });
