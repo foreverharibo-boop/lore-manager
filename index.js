@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.20';
+const VERSION = '1.3.21';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -2168,10 +2168,40 @@ function enhanceEntry(entry) {
 
             const controlWrap = control?.closest('.range-block-range, .world_entry_filter_control, [data-role="filter-control"]');
             controlWrap?.classList.add('slb-filter-control');
-            const header = Array.from(column.children).find(child => child !== controlWrap && child.querySelector?.('small'));
+            const header = Array.from(column.children).find(child => child !== controlWrap && queryCompatible(child, [
+                ':scope > small',
+                ':scope > label',
+                ':scope > .world_entry_form_label',
+                ':scope > [data-role="filter-label"]',
+                'small',
+                'label',
+                '.world_entry_form_label',
+                '[data-role="filter-label"]',
+            ])) || controlWrap?.previousElementSibling;
             header?.classList.add('slb-filter-column-header');
-            queryCompatible(header, ['label[for="character_exclusion"]', '.character_exclusion', '[data-role="exclude-filter"]'])?.classList.add('slb-filter-exclude');
-            queryCompatible(header, ['input[name="__invisible"]'])?.closest('label')?.classList.add('slb-filter-placeholder');
+            const excludeInput = queryCompatible(header, [
+                'input[name="character_exclusion"]',
+                'input[name="characterExclusion"]',
+                'input[name="excludeCharacterFilter"]',
+                'input[data-role="exclude-filter"]',
+            ]);
+            const excludeLabel = queryCompatible(header, [
+                'label[for="character_exclusion"]',
+                'label[for="characterExclusion"]',
+                '.character_exclusion',
+                '[data-role="exclude-filter"]',
+            ]) || excludeInput?.closest('label, .checkbox_label');
+            excludeLabel?.classList.add('slb-filter-exclude');
+
+            const placeholderInput = queryCompatible(header, [
+                'input[name="__invisible"]',
+                'input[data-role="filter-placeholder"]',
+            ]);
+            const placeholderLabel = queryCompatible(header, [
+                'label[for="__invisible"]',
+                '[data-role="filter-placeholder"]',
+            ]) || placeholderInput?.closest('label, .checkbox_label');
+            placeholderLabel?.classList.add('slb-filter-placeholder');
         });
         panels.filter.append(filterRow);
     }

@@ -2332,3 +2332,298 @@
     max-width: 100% !important;
     margin: 0 !important;
 }
+
+/* ============================================================
+   v1.3.21 — 호출 조건·연결 필터 재정렬
+   이전 모바일 고정폭보다 높은 우선순위로 실제 필드 폭을 초기화한다.
+   ============================================================ */
+
+/* ── 호출 조건: 한 줄 전체 사용 + 모든 제목/입력 시작선·끝선 통일 ── */
+#WorldInfo.slb-active .world_entry .slb-activation-overview,
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview {
+    display: grid !important;
+    box-sizing: border-box;
+    grid-template-columns:
+        minmax(0, 0.95fr)
+        minmax(0, 1.6fr)
+        minmax(0, 0.75fr)
+        minmax(0, 0.82fr)
+        minmax(0, 1.08fr) !important;
+    grid-template-rows: 53px !important;
+    column-gap: clamp(4px, 1vw, 9px) !important;
+    row-gap: 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 8px 0 14px !important;
+    align-items: stretch !important;
+    justify-items: stretch !important;
+    border: 0 !important;
+    overflow: visible !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview[hidden],
+#WorldInfo.slb-active .world_entry .slb-activation-overview:empty {
+    display: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview > .slb-header-field,
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview > .slb-header-field {
+    display: grid !important;
+    box-sizing: border-box !important;
+    grid-area: auto !important;
+    grid-template-rows: 18px 32px !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    row-gap: 3px !important;
+    flex: 0 1 auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: 53px !important;
+    min-height: 53px !important;
+    max-height: 53px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-self: stretch !important;
+    justify-self: stretch !important;
+    align-items: stretch !important;
+    overflow: visible !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-label,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field > small,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field > label {
+    display: flex !important;
+    box-sizing: border-box !important;
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 18px !important;
+    min-height: 18px !important;
+    max-height: 18px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: clamp(8px, 2.25vw, 11px) !important;
+    line-height: 1 !important;
+    letter-spacing: -0.01em;
+    text-align: center !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field > select,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field > input,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field > textarea,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field > .range-block-range {
+    box-sizing: border-box !important;
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    margin: 0 !important;
+    align-self: stretch !important;
+    justify-self: stretch !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .range-block-range > select,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .range-block-range > input,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .range-block-range > textarea {
+    box-sizing: border-box !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    margin: 0 !important;
+}
+
+/* overview의 실제 아래 padding으로 키워드 카드와 마진 상쇄 없이 분리한다. */
+#WorldInfo.slb-active .slb-panel[data-panel="activation"] > .slb-keyword-assistant {
+    margin-top: 0 !important;
+}
+
+/* ── 연결 필터: 두 열이 하나의 제목 행·하나의 컨트롤 행을 공유 ── */
+#WorldInfo.slb-active .slb-filter-grid {
+    --slb-filter-box-height: 96px;
+    display: grid !important;
+    box-sizing: border-box !important;
+    grid-template-columns: minmax(0, 1fr) max-content minmax(0, 1fr) !important;
+    grid-template-rows: 22px var(--slb-filter-box-height) !important;
+    column-gap: clamp(6px, 1.5vw, 12px) !important;
+    row-gap: 5px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-items: stretch !important;
+    align-content: start !important;
+    overflow: visible !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid > .slb-filter-column,
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header {
+    display: contents !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-1 > .slb-filter-column-header > small,
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-1 > .slb-filter-column-header > .world_entry_form_label,
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-1 > .slb-filter-column-header > [data-role="filter-label"],
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-1 > .slb-filter-column-header > label:not(.slb-filter-exclude):not(.slb-filter-placeholder) {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-2 > .slb-filter-column-header > small,
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-2 > .slb-filter-column-header > .world_entry_form_label,
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-2 > .slb-filter-column-header > [data-role="filter-label"],
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-2 > .slb-filter-column-header > label:not(.slb-filter-exclude):not(.slb-filter-placeholder) {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > small,
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > .world_entry_form_label,
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > [data-role="filter-label"],
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > label:not(.slb-filter-exclude):not(.slb-filter-placeholder) {
+    display: flex !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 22px !important;
+    min-height: 22px !important;
+    max-height: 22px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-self: stretch !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: clamp(8px, 2.25vw, 11px) !important;
+    line-height: 1 !important;
+    letter-spacing: -0.01em;
+    text-align: center !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude {
+    display: inline-flex !important;
+    box-sizing: border-box !important;
+    position: static !important;
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    width: max-content !important;
+    min-width: 0 !important;
+    height: 22px !important;
+    min-height: 22px !important;
+    max-height: 22px !important;
+    margin: 0 !important;
+    padding: 0 2px !important;
+    align-self: stretch !important;
+    justify-self: center !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 3px !important;
+    background: transparent !important;
+    font-size: clamp(9px, 2.35vw, 11px) !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    transform: none !important;
+    overflow: visible !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude input[type="checkbox"] {
+    box-sizing: border-box !important;
+    flex: 0 0 14px !important;
+    width: 14px !important;
+    min-width: 14px !important;
+    max-width: 14px !important;
+    height: 14px !important;
+    min-height: 14px !important;
+    max-height: 14px !important;
+    margin: 0 !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude small,
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude span {
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: inherit !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-placeholder {
+    display: none !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-1 > .slb-filter-control {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-2 > .slb-filter-control {
+    grid-column: 3 !important;
+    grid-row: 2 !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-control,
+#WorldInfo.slb-active .slb-filter-grid .range-block-range {
+    display: block !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    height: var(--slb-filter-box-height) !important;
+    min-height: var(--slb-filter-box-height) !important;
+    max-height: var(--slb-filter-box-height) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-self: stretch !important;
+    justify-self: stretch !important;
+    overflow: hidden !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid select[multiple],
+#WorldInfo.slb-active .slb-filter-grid select[name="characterFilter"],
+#WorldInfo.slb-active .slb-filter-grid select[name="character_filter"],
+#WorldInfo.slb-active .slb-filter-grid select[name="triggers"],
+#WorldInfo.slb-active .slb-filter-grid select[name="generationTriggers"],
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-control select,
+#WorldInfo.slb-active .slb-filter-grid .range-block-range select,
+#WorldInfo.slb-active .slb-filter-grid .select2-container,
+#WorldInfo.slb-active .slb-filter-grid .select2-selection--multiple {
+    display: block !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    height: var(--slb-filter-box-height) !important;
+    min-height: var(--slb-filter-box-height) !important;
+    max-height: var(--slb-filter-box-height) !important;
+    margin: 0 !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid select[multiple],
+#WorldInfo.slb-active .slb-filter-grid .select2-selection--multiple,
+#WorldInfo.slb-active .slb-filter-grid .select2-selection__rendered {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+}
