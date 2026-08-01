@@ -4,13 +4,15 @@ import {
     saveSettingsDebounced,
 } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
-import { getTokenCountAsync, guesstimate } from '../../../tokenizers.js';
+import { getTokenCountAsync } from '../../../tokenizers.js';
 import { loadWorldInfo, splitKeywordsAndRegexes } from '../../../world-info.js';
 import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
 const VERSION = '1.1.6';
+const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
+const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry';
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
@@ -29,10 +31,14 @@ const state = {
     observer: null,
     refreshTimer: null,
     tokenTimer: null,
+    tokenRenderTimer: null,
     tokenRunId: 0,
-    aggregateTokenCache: new Map(),
-    aggregateTokenPending: new Map(),
-    lastTokenSignature: '',
+    tokenRefreshRunId: 0,
+    pendingBookSwitch: '',
+    tokenCache: new Map(),
+    tokenCacheTouched: new Map(),
+    tokenCachePersistTimer: null,
+    entryTokenTimers: new Map(),
     liveActiveStates: new Map(),
     liveSyncTimer: null,
     navigatorDirty: true,
@@ -657,7 +663,6 @@ function syncEntryActiveState(entry) {
     if (data && killSwitch) data.disable = killSwitch.classList.contains('fa-toggle-off');
     updateNavigatorEntry(uid);
     renderTokenSummary(currentBookName(), state.currentBookData);
-    scheduleTokenSummary(state.currentBookData, 0);
 }
 
 function entryLabel(entry) {
@@ -726,7 +731,7 @@ function rebuildNavigator() {
     state.navigatorDirty = false;
     list.replaceChildren();
     mobile.replaceChildren();
-    updateEntryCountLabels(state.currentBookData);
+    document.getElementById('slb-page-count').textContent = `${entries.length}개`;
 
     for (const entry of entries) {
         const uid = getUid(entry);
@@ -1146,105 +1151,195 @@ function enhanceEntry(entry) {
     }
 }
 
+async function mapLimit(items, limit, mapper) {
+    const results = new Array(items.length);
+    let next = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (next < items.length) {
+            const index = next++;
+            results[index] = await mapper(items[index], index);
+        }
+    });
+    await Promise.all(workers);
+    return results;
+}
+
 function lorebookEntries(data) {
     return Object.values(data?.entries ?? {}).filter(entry => entry && typeof entry.content === 'string');
 }
 
-function createTokenSnapshot(data) {
-    const entries = lorebookEntries(data);
-    const activeEntries = entries.filter(entry => !entry.disable);
-    const totalText = entries.map(entry => entry.content).join('\n\n');
-    const activeText = activeEntries.map(entry => entry.content).join('\n\n');
-    const totalHash = hashText(totalText);
-    const activeHash = hashText(activeText);
-    return {
-        entries,
-        activeEntries,
-        totalText,
-        activeText,
-        totalHash,
-        activeHash,
-        signature: `${entries.length}:${activeEntries.length}:${totalHash}:${activeHash}`,
-    };
+function getBookTokenCache(book) {
+    if (!state.tokenCache.has(book)) state.tokenCache.set(book, new Map());
+    state.tokenCacheTouched.set(book, Date.now());
+    return state.tokenCache.get(book);
 }
 
-function updateEntryCountLabels(data) {
-    const pageCount = document.getElementById('slb-page-count');
-    if (!pageCount) return;
-    const currentCount = renderedEntries().length;
-    const totalCount = lorebookEntries(data).length;
-    pageCount.textContent = totalCount
-        ? `현재 ${currentCount}개 / 전체 ${totalCount}개`
-        : `현재 페이지 ${currentCount}개`;
+function loadPersistedTokenCache() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(TOKEN_CACHE_STORAGE_KEY) || 'null');
+        if (!parsed?.books || typeof parsed.books !== 'object') return;
+        for (const [book, record] of Object.entries(parsed.books)) {
+            const map = new Map();
+            for (const [uid, item] of Object.entries(record?.entries ?? {})) {
+                if (item && typeof item.hash === 'string' && Number.isFinite(item.count)) {
+                    map.set(String(uid), { hash: item.hash, count: item.count });
+                }
+            }
+            if (map.size) {
+                state.tokenCache.set(book, map);
+                state.tokenCacheTouched.set(book, Number(record?.at) || 0);
+            }
+        }
+    } catch (error) {
+        console.warn('[로어북 매니저] Failed to load token cache', error);
+    }
 }
 
-function paintTokenSummary(book, data, snapshot, exactCounts = null) {
+function schedulePersistTokenCache() {
+    clearTimeout(state.tokenCachePersistTimer);
+    state.tokenCachePersistTimer = setTimeout(() => {
+        try {
+            const books = {};
+            const sorted = Array.from(state.tokenCache.keys())
+                .sort((a, b) => (state.tokenCacheTouched.get(b) ?? 0) - (state.tokenCacheTouched.get(a) ?? 0))
+                .slice(0, TOKEN_CACHE_MAX_BOOKS);
+            for (const book of sorted) {
+                const entries = {};
+                for (const [uid, item] of state.tokenCache.get(book)) entries[uid] = item;
+                books[book] = { at: state.tokenCacheTouched.get(book) ?? 0, entries };
+            }
+            localStorage.setItem(TOKEN_CACHE_STORAGE_KEY, JSON.stringify({ books }));
+        } catch (error) {
+            console.warn('[로어북 매니저] Failed to persist token cache', error);
+        }
+    }, 800);
+}
+
+function renderTokenSummary(book, data) {
     if (!book || book !== currentBookName() || !data?.entries) return;
     const totalElement = document.getElementById('slb-total-tokens');
     const activeElement = document.getElementById('slb-active-tokens');
     const countElement = document.getElementById('slb-entry-count');
     if (!totalElement || !activeElement || !countElement) return;
 
-    const total = exactCounts?.total ?? guesstimate(snapshot.totalText);
-    const active = exactCounts?.active ?? guesstimate(snapshot.activeText);
-    const prefix = exactCounts ? '' : '약 ';
-    totalElement.textContent = `${prefix}${total.toLocaleString()} 토큰`;
-    activeElement.textContent = `${prefix}${active.toLocaleString()} 토큰`;
-    countElement.textContent = `${snapshot.entries.length}개 · 활성 ${snapshot.activeEntries.length}개`;
-    state.lastTokenSignature = snapshot.signature;
-    updateEntryCountLabels(data);
+    const entries = lorebookEntries(data);
+    const cache = getBookTokenCache(book);
+    let total = 0;
+    let active = 0;
+    let activeCount = 0;
+    let readyCount = 0;
+    let activeReadyCount = 0;
+    for (const entry of entries) {
+        const cached = cache.get(String(entry.uid));
+        const isReady = cached?.hash === hashText(entry.content);
+        if (isReady) {
+            total += cached.count;
+            readyCount++;
+        }
+        if (!entry.disable) {
+            activeCount++;
+            if (isReady) {
+                active += cached.count;
+                activeReadyCount++;
+            }
+        }
+    }
+
+    totalElement.textContent = readyCount === entries.length
+        ? `${total.toLocaleString()} 토큰`
+        : readyCount
+            ? `${total.toLocaleString()} 토큰 · 계산 중…`
+            : '계산 중…';
+    activeElement.textContent = activeReadyCount === activeCount
+        ? `${active.toLocaleString()} 토큰`
+        : activeReadyCount
+            ? `${active.toLocaleString()} 토큰 · 계산 중…`
+            : '계산 중…';
+    countElement.textContent = `${entries.length}개 · 활성 ${activeCount}개`;
 }
 
-function renderTokenSummary(book, data) {
-    if (!book || !data?.entries) return null;
-    const snapshot = createTokenSnapshot(data);
-    const cacheKey = `${book}:${snapshot.signature}`;
-    const exactCounts = state.aggregateTokenCache.get(cacheKey) ?? null;
-    paintTokenSummary(book, data, snapshot, exactCounts);
-    return snapshot;
-}
-
-function withTimeout(promise, timeoutMs = 8000) {
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('토큰 계산 시간 초과')), timeoutMs);
-        Promise.resolve(promise).then(
-            value => {
-                clearTimeout(timer);
-                resolve(value);
-            },
-            error => {
-                clearTimeout(timer);
-                reject(error);
-            },
-        );
-    });
+function queueTokenSummaryRender(book, data) {
+    clearTimeout(state.tokenRenderTimer);
+    state.tokenRenderTimer = setTimeout(() => renderTokenSummary(book, data), 16);
 }
 
 function setTokenSummaryPending() {
     const totalElement = document.getElementById('slb-total-tokens');
     const activeElement = document.getElementById('slb-active-tokens');
     const countElement = document.getElementById('slb-entry-count');
-    if (totalElement) totalElement.textContent = '불러오는 중…';
-    if (activeElement) activeElement.textContent = '불러오는 중…';
+    if (totalElement) totalElement.textContent = '계산 중…';
+    if (activeElement) activeElement.textContent = '계산 중…';
     if (countElement) countElement.textContent = '—';
 }
 
 function scheduleEntryTokenCount(book, uid, content) {
     if (!book || !uid) return;
+    // currentBookData가 다른 책의 데이터라면 절대 건드리지 않는다.
+    // uid는 책마다 0부터 시작해서 겹치기 때문에, 여기서 잘못 매칭되면
+    // 이전 책 데이터가 오염되고 요약(항목 수/토큰)이 틀어진다.
+    if (book !== currentBookName() || state.currentBook !== book) {
+        scheduleTokenSummary(null, 30);
+        return;
+    }
+    const timerKey = `${book}:${uid}`;
     const data = state.currentBookData;
     const entry = data?.entries?.[uid] ?? data?.entries?.[Number(uid)];
-    if (!entry) return;
-    entry.content = content;
-    renderTokenSummary(book, data);
-    scheduleTokenSummary(data, 100);
+    if (entry) {
+        entry.content = content;
+        renderTokenSummary(book, data);
+    }
+    clearTimeout(state.entryTokenTimers.get(timerKey));
+    let timer = null;
+    timer = setTimeout(async () => {
+        try {
+            if (book !== currentBookName()) return;
+            const latestData = state.currentBookData;
+            const latestSource = latestData?.entries?.[uid] ?? latestData?.entries?.[Number(uid)];
+            if (!latestSource || latestSource.content !== content) return;
+            const contentHash = hashText(content);
+            const count = Number(await getTokenCountAsync(content)) || 0;
+            const latestEntry = state.currentBookData?.entries?.[uid]
+                ?? state.currentBookData?.entries?.[Number(uid)];
+            if (book !== currentBookName() || !latestEntry || hashText(latestEntry.content) !== contentHash) return;
+            getBookTokenCache(book).set(String(uid), { hash: contentHash, count });
+            schedulePersistTokenCache();
+            renderTokenSummary(book, state.currentBookData);
+        } catch (error) {
+            console.warn('[로어북 매니저] Failed to count entry tokens', error);
+        } finally {
+            if (state.entryTokenTimers.get(timerKey) === timer) state.entryTokenTimers.delete(timerKey);
+        }
+    }, 80);
+    state.entryTokenTimers.set(timerKey, timer);
 }
 
 function syncLiveEditorTokens() {
     const book = currentBookName();
-    const data = state.currentBookData;
-    if (!book || !data?.entries) return;
+    if (!book) return;
 
-    let changed = false;
+    // change 이벤트 없이(프로그램적 전환 등) 로어북이 바뀐 경우를 감지한다.
+    // 이걸 안 잡으면 이전 책 데이터로 새 책 요약을 렌더해서 항목 수가 틀어진다.
+    if (state.currentBook !== book) {
+        if (state.pendingBookSwitch === book) return;
+        state.pendingBookSwitch = book;
+        state.currentBook = '';
+        state.currentBookData = null;
+        state.selectedUid = '';
+        state.navigatorDirty = true;
+        state.liveActiveStates.clear();
+        for (const timer of state.entryTokenTimers.values()) clearTimeout(timer);
+        state.entryTokenTimers.clear();
+        setTokenSummaryPending();
+        scheduleEnhance();
+        scheduleTokenSummary(null, 30);
+        return;
+    }
+
+    const data = state.currentBookData;
+    if (!data?.entries) return;
+
+    let activeChanged = false;
+    const cache = getBookTokenCache(book);
     for (const entryElement of renderedEntries()) {
         const uid = getUid(entryElement);
         const dataEntry = data.entries?.[uid] ?? data.entries?.[Number(uid)];
@@ -1258,24 +1353,26 @@ function syncLiveEditorTokens() {
             state.liveActiveStates.set(stateKey, disabled);
             if (dataEntry.disable !== disabled) {
                 dataEntry.disable = disabled;
-                changed = true;
+                activeChanged = true;
             } else if (previous !== undefined && previous !== disabled) {
-                changed = true;
+                activeChanged = true;
             }
         }
 
         const source = entryElement.querySelector('textarea[name="content"]');
-        if (source && dataEntry.content !== source.value) {
-            dataEntry.content = source.value;
-            changed = true;
+        if (!source) continue;
+        const sourceHash = hashText(source.value);
+        const timerKey = `${book}:${uid}`;
+        if (
+            cache.get(String(uid))?.hash !== sourceHash
+            && !state.entryTokenTimers.has(timerKey)
+            && !state.tokenRefreshRunId
+        ) {
+            scheduleEntryTokenCount(book, uid, source.value);
         }
     }
 
-    const snapshot = createTokenSnapshot(data);
-    if (changed || snapshot.signature !== state.lastTokenSignature) {
-        paintTokenSummary(book, data, snapshot);
-        scheduleTokenSummary(data, 60);
-    }
+    if (activeChanged) renderTokenSummary(book, data);
 }
 
 async function refreshTokenSummary(forcedData = null) {
@@ -1288,6 +1385,8 @@ async function refreshTokenSummary(forcedData = null) {
 
     if (!book) {
         state.currentBookData = null;
+        state.currentBook = '';
+        state.pendingBookSwitch = '';
         totalElement.textContent = '—';
         activeElement.textContent = '—';
         countElement.textContent = '—';
@@ -1300,44 +1399,37 @@ async function refreshTokenSummary(forcedData = null) {
         if (!data?.entries) return;
         state.currentBook = book;
         state.currentBookData = data;
-        const snapshot = renderTokenSummary(book, data);
+        const entries = lorebookEntries(data);
+        const cache = getBookTokenCache(book);
+        const liveUids = new Set(entries.map(entry => String(entry.uid)));
+        for (const uid of cache.keys()) {
+            if (!liveUids.has(uid)) cache.delete(uid);
+        }
+
+        const staleEntries = entries.filter(entry => cache.get(String(entry.uid))?.hash !== hashText(entry.content));
+        renderTokenSummary(book, data);
         renderedEntries().forEach(entry => updateNavigatorEntry(getUid(entry)));
-        if (!snapshot) return;
 
-        const cacheKey = `${book}:${snapshot.signature}`;
-        if (state.aggregateTokenCache.has(cacheKey)) return;
-        let aggregatePromise = state.aggregateTokenPending.get(cacheKey);
-        if (!aggregatePromise) {
-            const totalPromise = getTokenCountAsync(snapshot.totalText);
-            const activePromise = snapshot.activeText === snapshot.totalText
-                ? totalPromise
-                : getTokenCountAsync(snapshot.activeText);
-            aggregatePromise = withTimeout(Promise.all([totalPromise, activePromise]));
-            state.aggregateTokenPending.set(cacheKey, aggregatePromise);
-        }
-
-        let total;
-        let active;
-        try {
-            [total, active] = await aggregatePromise;
-        } finally {
-            if (state.aggregateTokenPending.get(cacheKey) === aggregatePromise) {
-                state.aggregateTokenPending.delete(cacheKey);
+        state.tokenRefreshRunId = runId;
+        await mapLimit(staleEntries, 8, async entry => {
+            const contentHash = hashText(entry.content);
+            const count = Number(await getTokenCountAsync(entry.content)) || 0;
+            const latest = data.entries?.[entry.uid] ?? data.entries?.[Number(entry.uid)];
+            if (latest && hashText(latest.content) === contentHash) {
+                cache.set(String(entry.uid), { hash: contentHash, count });
+                if (runId === state.tokenRunId) queueTokenSummaryRender(book, data);
             }
-        }
+        });
+        if (staleEntries.length) schedulePersistTokenCache();
         if (currentBookName() !== book || runId !== state.tokenRunId) return;
-        const latestSnapshot = createTokenSnapshot(state.currentBookData);
-        if (latestSnapshot.signature !== snapshot.signature) return;
-        const exactCounts = { total: Number(total) || 0, active: Number(active) || 0 };
-        state.aggregateTokenCache.set(cacheKey, exactCounts);
-        if (state.aggregateTokenCache.size > 60) {
-            state.aggregateTokenCache.delete(state.aggregateTokenCache.keys().next().value);
-        }
-        paintTokenSummary(book, state.currentBookData, latestSnapshot, exactCounts);
+        renderTokenSummary(book, data);
     } catch (error) {
         console.warn('[로어북 매니저] Failed to count tokens', error);
-        const data = state.currentBookData;
-        if (data?.entries) paintTokenSummary(book, data, createTokenSnapshot(data));
+        totalElement.textContent = '계산 실패';
+        activeElement.textContent = '계산 실패';
+    } finally {
+        if (state.tokenRefreshRunId === runId) state.tokenRefreshRunId = 0;
+        state.pendingBookSwitch = '';
     }
 }
 
@@ -1374,14 +1466,17 @@ function scheduleEnhance() {
 function bindEvents() {
     document.getElementById('world_editor_select')?.addEventListener('change', () => {
         state.selectedUid = '';
+        state.currentBook = '';
         state.currentBookData = null;
+        state.pendingBookSwitch = '';
         state.navigatorDirty = true;
         state.tokenRunId++;
-        state.lastTokenSignature = '';
         state.liveActiveStates.clear();
+        for (const timer of state.entryTokenTimers.values()) clearTimeout(timer);
+        state.entryTokenTimers.clear();
         setTokenSummaryPending();
         scheduleEnhance();
-        scheduleTokenSummary(null, 80);
+        scheduleTokenSummary(null, 30);
     });
     document.getElementById('world_refresh')?.addEventListener('click', () => scheduleTokenSummary());
     document.getElementById('world_popup_new')?.addEventListener('click', () => {
@@ -1410,6 +1505,7 @@ function init() {
     if (worldInfo.classList.contains('slb-active')) return;
 
     getSettings();
+    loadPersistedTokenCache();
     worldInfo.classList.add('slb-active');
     createAIBar();
     createWorkspace();
