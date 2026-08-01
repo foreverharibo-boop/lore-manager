@@ -2117,3 +2117,145 @@
         line-height: 1.2;
     }
 }
+
+/* ============================================================
+   v1.3.19 — 호출 조건 상단 줄 & 연결 필터 정렬 (모든 화면 폭 공통)
+   ============================================================ */
+
+/* 호출 조건: Strategy·위치·깊이·순서·발동확률을 한 줄에 꽉 차게 */
+#WorldInfo.slb-active .world_entry .slb-activation-overview,
+#WorldInfo.slb-active .world_entry.slb-compact-entry .slb-activation-overview {
+    display: grid !important;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.9fr) minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1fr) !important;
+    grid-template-rows: none !important;
+    gap: 0 14px !important;
+    width: 100% !important;
+    align-items: end !important;
+    /* 위 여백은 탭바 밑선의 margin(10px)이 만들므로, 아래도 10px로 맞춰
+       AI 키워드 추천 박스와 탭 밑선 사이 정중앙에 오게 한다 */
+    margin: 0 0 10px !important;
+    padding: 0 !important;
+    border: 0 !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview[hidden],
+#WorldInfo.slb-active .world_entry .slb-activation-overview:empty {
+    display: none !important;
+    margin: 0 !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field {
+    grid-area: auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    margin: 0 !important;
+    justify-self: stretch !important;
+    align-self: end !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field > select,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field > input,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field > textarea {
+    box-sizing: border-box;
+    width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+}
+
+/* 연결 필터: 두 열 폭·높이 동일, 헤더 한 줄 고정 */
+#WorldInfo.slb-active .slb-filter-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-rows: none !important;
+    gap: 12px !important;
+    width: 100% !important;
+    align-items: stretch !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid > .slb-filter-column {
+    display: grid !important;
+    grid-template-rows: auto minmax(0, 1fr) !important;
+    row-gap: 4px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+    margin: 0 !important;
+}
+
+/* 헤더: 제목과 Exclude가 같은 줄 맨 위에 나란히 (줄바꿈 금지) */
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header {
+    display: flex !important;
+    flex-flow: row nowrap !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    gap: 6px !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header > small:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-column-header .checkbox_label,
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-exclude {
+    flex: 0 0 auto !important;
+    margin: 0 !important;
+    align-self: center !important;
+    white-space: nowrap !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .slb-filter-control,
+#WorldInfo.slb-active .slb-filter-grid .range-block-range {
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+}
+
+/* 두 선택창을 열 폭에 꼭 맞게 + 같은 최대 높이로 고정 */
+#WorldInfo.slb-active .slb-filter-grid select[name="characterFilter"],
+#WorldInfo.slb-active .slb-filter-grid select[name="triggers"] {
+    box-sizing: border-box;
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 150px !important;
+    min-height: 150px !important;
+    max-height: 150px !important;
+    margin: 0 !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid .select2-container {
+    width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+}
+
+/* 헤더 클래스 감지 실패 시를 위한 네이티브 구조 폴백 */
+#WorldInfo.slb-active .slb-filter-grid > .slb-filter-column > .flex-container:first-child {
+    display: flex !important;
+    flex-flow: row nowrap !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    gap: 6px !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid > .slb-filter-column > .flex-container:first-child > small {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+#WorldInfo.slb-active .slb-filter-grid > .slb-filter-column > .flex-container:first-child .checkbox_label {
+    flex: 0 0 auto !important;
+    margin: 0 !important;
+    white-space: nowrap !important;
+}
