@@ -6,14 +6,15 @@ import {
 } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
-import { loadWorldInfo, splitKeywordsAndRegexes, saveWorldInfo, setWIOriginalDataValue } from '../../../world-info.js';
+import { loadWorldInfo, splitKeywordsAndRegexes, saveWorldInfo, setWIOriginalDataValue, worldInfoFilter } from '../../../world-info.js';
 import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.3';
+const VERSION = '1.3.4';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
+const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
 const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)';
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
@@ -21,6 +22,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     translationProvider: 'profile',
     translationPrompt: '',
     tokenScope: 'active',
+    entryFilter: 'all',
     translateMissingOnOpen: true,
     autoTranslateSource: true,
     autoSyncToSource: true,
@@ -486,12 +488,14 @@ function createAIBar() {
                 <label class="slb-field slb-prompt-field"><small>번역 추가 지시문 · AI 프로필 모드에서만 적용</small>
                     <textarea id="slb-translate-prompt" class="text_pole" rows="3" placeholder="번역 언어는 위 설정을 자동으로 따릅니다. 문체·존칭·용어 같은 추가 요구사항만 적어주세요. 예) 대사는 반말로, 지문은 건조한 문어체로. (구글 번역에는 적용되지 않습니다)"></textarea>
                 </label>
+                <div class="slb-prompt-meta">
+                    <small class="slb-ai-note">AI 수정·키워드 추천·원문 반영은 구글 번역 모드에서도 전용 프로필을 사용합니다.</small>
+                    <small id="slb-ai-status">확장 탭에서 번역 방식을 설정해주세요.</small>
+                </div>
                 <div class="slb-ai-options">
                     <label><input type="checkbox" id="slb-translate-missing"> 번역본 없는 항목을 열 때 자동 번역</label>
                     <label><input type="checkbox" id="slb-auto-translate"> 원문 변경 시 자동 번역</label>
                     <label><input type="checkbox" id="slb-auto-sync"> 번역 변경 시 원문 자동 반영</label>
-                    <small class="slb-ai-note">AI 수정·키워드 추천·원문 반영은 구글 번역 모드에서도 전용 프로필을 사용합니다.</small>
-                    <small id="slb-ai-status">확장 탭에서 번역 방식을 설정해주세요.</small>
                 </div>
             </div>
         </div>`;
@@ -578,7 +582,7 @@ function createAIBar() {
 }
 
 function createWorkspace() {
-    if (document.getElementById('slb-workspace')) return;
+    if (document.getElementById('slb-token-strip')) return;
     const popup = document.getElementById('world_popup');
     const entries = document.getElementById('world_popup_entries_list');
     if (!popup || !entries) return;
@@ -587,56 +591,38 @@ function createWorkspace() {
     tokens.id = 'slb-token-strip';
     tokens.innerHTML = `
         <span>전체 항목 <strong id="slb-total-tokens">—</strong></span>
-        <span><select id="slb-token-scope" class="slb-token-scope" title="두 번째 토큰 합계의 기준">
-            <option value="active">활성 항목</option>
-            <option value="constant">상시 주입 🔵</option>
-        </select> <strong id="slb-active-tokens">—</strong></span>
+        <span>선택 주입 🟢 <strong id="slb-selective-tokens">—</strong></span>
+        <span>상시 주입 🔵 <strong id="slb-constant-tokens">—</strong></span>
         <span>항목 수 <strong id="slb-entry-count">—</strong></span>`;
 
-    const workspace = createElement('div', 'slb-workspace');
-    workspace.id = 'slb-workspace';
-    const navigator = createElement('aside', 'slb-navigator');
-    navigator.innerHTML = `
-        <div class="slb-nav-head"><strong>항목</strong><small id="slb-page-count">0개</small></div>
-        <div class="slb-mobile-row">
-            <select id="slb-mobile-select" class="text_pole slb-mobile-select" aria-label="편집할 로어북 항목"></select>
-            <button type="button" id="slb-mobile-sort" class="menu_button slb-mobile-sort" title="항목 순서 편집 (드래그 정렬)"><i class="fa-solid fa-arrow-down-up-across-line" aria-hidden="true"></i></button>
-        </div>
-        <div id="slb-nav-list" class="slb-nav-list"></div>`;
+    const filters = createElement('div', 'slb-entry-filters');
+    filters.id = 'slb-entry-filters';
+    filters.innerHTML = `
+        <small>항목 필터</small>
+        <button type="button" class="menu_button slb-filter-button" data-filter="all">전체</button>
+        <button type="button" class="menu_button slb-filter-button" data-filter="normal">선택 주입 🟢</button>
+        <button type="button" class="menu_button slb-filter-button" data-filter="constant">상시 주입 🔵</button>`;
 
     popup.insertBefore(tokens, entries);
+    popup.insertBefore(filters, entries);
+    syncFilterButtons();
 
-    const tokenScope = document.getElementById('slb-token-scope');
-    tokenScope.value = getSettings().tokenScope;
-    tokenScope.addEventListener('change', () => {
-        getSettings().tokenScope = tokenScope.value;
+    filters.addEventListener('click', event => {
+        const button = event.target.closest('.slb-filter-button');
+        if (!button) return;
+        const value = button.dataset.filter || 'all';
+        getSettings().entryFilter = value;
         saveSettingsDebounced();
-        renderTokenSummary(currentBookName(), state.currentBookData);
-    });
-    popup.insertBefore(workspace, entries);
-    workspace.append(navigator, entries);
-    state.workspace = workspace;
-
-    document.getElementById('slb-mobile-select').addEventListener('change', event => {
-        selectEntry(event.currentTarget.value, true);
-    });
-
-    document.getElementById('slb-mobile-sort').addEventListener('click', () => {
-        const sorting = workspace.classList.toggle('slb-mobile-sorting');
-        document.getElementById('slb-mobile-sort').classList.toggle('slb-active-toggle', sorting);
-        notify(sorting ? '항목을 길게 눌러 드래그하면 순서가 바뀝니다.' : '순서 편집을 마쳤습니다.');
+        syncFilterButtons();
+        worldInfoFilter.setFilterData(ENTRY_STATE_FILTER, value);
     });
 
     entries.addEventListener('input', event => {
         const entry = event.target.closest('.world_entry');
         if (!entry) return;
         const uid = getUid(entry);
-        if (event.target.matches('textarea[name="comment"], select[name="entryStateSelector"]')) {
-            updateNavigatorEntry(uid);
-            if (event.target.matches('select[name="entryStateSelector"]')) {
-                // 🔵 상시 여부가 바뀌면 '상시 주입' 합계에 즉시 반영
-                setTimeout(() => renderTokenSummary(currentBookName(), state.currentBookData), 0);
-            }
+        if (event.target.matches('select[name="entryStateSelector"]')) {
+            setTimeout(() => syncEntryInjectionState(entry), 0);
         }
         if (event.target.matches('textarea[name="content"]')) {
             scheduleEntryTokenCount(currentBookName(), uid, event.target.value);
@@ -688,8 +674,25 @@ function createWorkspace() {
             state.navigatorDirty = true;
             scheduleEnhance();
         });
+}
 
-    setupNavigatorDrag();
+function installEntryStateFilter() {
+    if (!worldInfoFilter.filterFunctions[ENTRY_STATE_FILTER]) {
+        worldInfoFilter.filterFunctions[ENTRY_STATE_FILTER] = data => {
+            const filter = worldInfoFilter.getFilterData(ENTRY_STATE_FILTER) || 'all';
+            if (filter === 'constant') return data.filter(entry => Boolean(entry.constant));
+            if (filter === 'normal') return data.filter(entry => !entry.constant && !entry.vectorized);
+            return data;
+        };
+    }
+    worldInfoFilter.setFilterData(ENTRY_STATE_FILTER, getSettings().entryFilter || 'all');
+}
+
+function syncFilterButtons() {
+    const current = getSettings().entryFilter || 'all';
+    document.querySelectorAll('.slb-filter-button').forEach(button => {
+        button.classList.toggle('is-active', button.dataset.filter === current);
+    });
 }
 
 function renderedEntries() {
@@ -761,19 +764,20 @@ function enhanceEntryHeader(entry) {
     killSwitch?.addEventListener('click', () => setTimeout(() => syncEntryActiveState(entry), 0));
     toggles.append(...[dragHandle, drawerToggle, killSwitch].filter(Boolean));
 
-    const orderedFields = [
-        titleField,
+    const deferredFields = createElement('div', 'slb-deferred-header-fields');
+    deferredFields.append(...[
         strategyField,
         entry.querySelector('.slb-position-field'),
         entry.querySelector('.slb-depth-field'),
         entry.querySelector('.slb-order-field'),
         entry.querySelector('.slb-trigger-field'),
-    ].filter(Boolean);
-    fields.append(...orderedFields);
+    ].filter(Boolean));
+    fields.classList.add('slb-header-title-only');
+    fields.append(titleField);
 
     const nativeActions = Array.from(header.children).filter(child => child.classList?.contains('menu_button'));
     actions.append(...nativeActions);
-    shell.append(toggles, fields, actions);
+    shell.append(toggles, fields, actions, deferredFields);
     header.classList.add('slb-entry-header');
     header.append(shell);
     thinControls.remove();
@@ -793,8 +797,22 @@ function syncEntryActiveState(entry) {
     const killSwitch = entry.querySelector('[name="entryKillSwitch"]');
     const data = entryData(uid);
     if (data && killSwitch) data.disable = killSwitch.classList.contains('fa-toggle-off');
-    updateNavigatorEntry(uid);
     renderTokenSummary(currentBookName(), state.currentBookData);
+}
+
+function syncEntryInjectionState(entry) {
+    if (!entry) return;
+    const uid = getUid(entry);
+    const selector = entry.querySelector('select[name="entryStateSelector"]');
+    const data = entryData(uid);
+    if (data && selector) {
+        data.constant = selector.value === 'constant';
+        data.vectorized = selector.value === 'vectorized';
+    }
+    renderTokenSummary(currentBookName(), state.currentBookData);
+    if ((getSettings().entryFilter || 'all') !== 'all') {
+        document.getElementById('world_refresh')?.click();
+    }
 }
 
 function entryLabel(entry) {
@@ -1282,6 +1300,12 @@ function enhanceEntry(entry) {
     const filterRow = edit.querySelector('select[name="characterFilter"]')?.closest('.flex-container.wide100p.flexGap10');
     const bottomControls = edit.querySelector('[name="WIEntryBottomControls"]');
     const matchingSources = edit.querySelector('input[name="matchCharacterDescription"]')?.closest('.inline-drawer');
+    const deferredHeader = entry.querySelector('.slb-deferred-header-fields');
+    const activationOverview = createElement('div', 'slb-activation-overview');
+    if (deferredHeader) {
+        activationOverview.append(...Array.from(deferredHeader.children));
+        deferredHeader.remove();
+    }
     const originalChildren = Array.from(edit.children);
 
     const tabbar = createElement('div', 'slb-tabbar');
@@ -1322,9 +1346,10 @@ function enhanceEntry(entry) {
     keywordAssistant.append(keywordHead, keywordHelp, keywordResults);
 
     panels.content.append(contentBlock, syncRow);
-    if (commentContainer) panels.content.append(commentContainer);
+    if (activationOverview.children.length) panels.activation.append(activationOverview);
     panels.activation.append(keywordAssistant);
     if (activationContainer && activationContainer.isConnected) panels.activation.append(activationContainer);
+    if (commentContainer && commentContainer.isConnected) panels.activation.append(commentContainer);
     panels.activation.append(entryMeta);
 
     if (groupRow) {
@@ -1528,20 +1553,22 @@ function schedulePersistTokenCache() {
 function renderTokenSummary(book, data) {
     if (!book || book !== currentBookName() || !data?.entries) return;
     const totalElement = document.getElementById('slb-total-tokens');
-    const activeElement = document.getElementById('slb-active-tokens');
+    const selectiveElement = document.getElementById('slb-selective-tokens');
+    const constantElement = document.getElementById('slb-constant-tokens');
     const countElement = document.getElementById('slb-entry-count');
-    if (!totalElement || !activeElement || !countElement) return;
+    if (!totalElement || !selectiveElement || !constantElement || !countElement) return;
 
     const entries = lorebookEntries(data);
     const cache = getBookTokenCache(book);
-    const scope = getSettings().tokenScope;
-    const inScope = entry => !entry.disable && (scope !== 'constant' || Boolean(entry.constant));
     let total = 0;
-    let active = 0;
+    let selective = 0;
+    let constant = 0;
     let activeCount = 0;
-    let scopeCount = 0;
+    let selectiveCount = 0;
+    let constantCount = 0;
     let readyCount = 0;
-    let activeReadyCount = 0;
+    let selectiveReadyCount = 0;
+    let constantReadyCount = 0;
     for (const entry of entries) {
         const cached = cache.get(String(entry.uid));
         const isReady = cached?.hash === hashText(entry.content);
@@ -1550,11 +1577,18 @@ function renderTokenSummary(book, data) {
             readyCount++;
         }
         if (!entry.disable) activeCount++;
-        if (inScope(entry)) {
-            scopeCount++;
+        if (!entry.disable && !entry.constant && !entry.vectorized) {
+            selectiveCount++;
             if (isReady) {
-                active += cached.count;
-                activeReadyCount++;
+                selective += cached.count;
+                selectiveReadyCount++;
+            }
+        }
+        if (!entry.disable && entry.constant) {
+            constantCount++;
+            if (isReady) {
+                constant += cached.count;
+                constantReadyCount++;
             }
         }
     }
@@ -1564,14 +1598,17 @@ function renderTokenSummary(book, data) {
         : readyCount
             ? `${total.toLocaleString()} 토큰 · 계산 중…`
             : '계산 중…';
-    activeElement.textContent = activeReadyCount === scopeCount
-        ? `${active.toLocaleString()} 토큰`
-        : activeReadyCount
-            ? `${active.toLocaleString()} 토큰 · 계산 중…`
-            : (scopeCount ? '계산 중…' : '0 토큰');
-    countElement.textContent = scope === 'constant'
-        ? `${entries.length}개 · 활성 ${activeCount}개 · 상시 ${scopeCount}개`
-        : `${entries.length}개 · 활성 ${activeCount}개`;
+    selectiveElement.textContent = selectiveReadyCount === selectiveCount
+        ? `${selective.toLocaleString()} 토큰`
+        : selectiveReadyCount
+            ? `${selective.toLocaleString()} 토큰 · 계산 중…`
+            : (selectiveCount ? '계산 중…' : '0 토큰');
+    constantElement.textContent = constantReadyCount === constantCount
+        ? `${constant.toLocaleString()} 토큰`
+        : constantReadyCount
+            ? `${constant.toLocaleString()} 토큰 · 계산 중…`
+            : (constantCount ? '계산 중…' : '0 토큰');
+    countElement.textContent = `${entries.length}개 · 활성 ${activeCount}개 · 선택 ${selectiveCount}개 · 상시 ${constantCount}개`;
 }
 
 function queueTokenSummaryRender(book, data) {
@@ -1581,10 +1618,12 @@ function queueTokenSummaryRender(book, data) {
 
 function setTokenSummaryPending() {
     const totalElement = document.getElementById('slb-total-tokens');
-    const activeElement = document.getElementById('slb-active-tokens');
+    const selectiveElement = document.getElementById('slb-selective-tokens');
+    const constantElement = document.getElementById('slb-constant-tokens');
     const countElement = document.getElementById('slb-entry-count');
     if (totalElement) totalElement.textContent = '계산 중…';
-    if (activeElement) activeElement.textContent = '계산 중…';
+    if (selectiveElement) selectiveElement.textContent = '계산 중…';
+    if (constantElement) constantElement.textContent = '계산 중…';
     if (countElement) countElement.textContent = '—';
 }
 
@@ -1696,16 +1735,18 @@ async function refreshTokenSummary(forcedData = null) {
     const book = currentBookName();
     const runId = ++state.tokenRunId;
     const totalElement = document.getElementById('slb-total-tokens');
-    const activeElement = document.getElementById('slb-active-tokens');
+    const selectiveElement = document.getElementById('slb-selective-tokens');
+    const constantElement = document.getElementById('slb-constant-tokens');
     const countElement = document.getElementById('slb-entry-count');
-    if (!totalElement || !activeElement || !countElement) return;
+    if (!totalElement || !selectiveElement || !constantElement || !countElement) return;
 
     if (!book) {
         state.currentBookData = null;
         state.currentBook = '';
         state.pendingBookSwitch = '';
         totalElement.textContent = '—';
-        activeElement.textContent = '—';
+        selectiveElement.textContent = '—';
+        constantElement.textContent = '—';
         countElement.textContent = '—';
         return;
     }
@@ -1725,8 +1766,6 @@ async function refreshTokenSummary(forcedData = null) {
 
         const staleEntries = entries.filter(entry => cache.get(String(entry.uid))?.hash !== hashText(entry.content));
         renderTokenSummary(book, data);
-        renderedEntries().forEach(entry => updateNavigatorEntry(getUid(entry)));
-
         state.tokenRefreshRunId = runId;
         await mapLimit(staleEntries, 8, async entry => {
             const contentHash = hashText(entry.content);
@@ -1743,7 +1782,8 @@ async function refreshTokenSummary(forcedData = null) {
     } catch (error) {
         console.warn('[로어북 매니저] Failed to count tokens', error);
         totalElement.textContent = '계산 실패';
-        activeElement.textContent = '계산 실패';
+        selectiveElement.textContent = '계산 실패';
+        constantElement.textContent = '계산 실패';
     } finally {
         if (state.tokenRefreshRunId === runId) state.tokenRefreshRunId = 0;
         state.pendingBookSwitch = '';
@@ -1765,8 +1805,7 @@ function enhanceAll() {
         enhanceEntryHeader(entry);
         enhanceEntry(entry);
     });
-    const signature = getNavigatorSignature(entries);
-    if (state.navigatorDirty || state.navigatorSignature !== signature) rebuildNavigator();
+    syncFilterButtons();
     syncAutoControls();
 
     // The editor can render its selected lorebook after this extension's first
@@ -1824,6 +1863,7 @@ function init() {
 
     getSettings();
     loadPersistedTokenCache();
+    installEntryStateFilter();
     worldInfo.classList.add('slb-active');
     createAIBar();
     createWorkspace();
