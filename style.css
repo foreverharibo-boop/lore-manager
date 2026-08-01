@@ -61,6 +61,29 @@
     min-width: 0;
 }
 
+#WorldInfo.slb-active .slb-profile-field {
+    flex: 0 1 360px;
+    max-width: 360px;
+}
+
+#WorldInfo.slb-active .slb-language-field {
+    flex: 0 1 190px;
+    max-width: 190px;
+}
+
+#WorldInfo.slb-active #slb-test-profile {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-self: flex-end;
+    align-items: center;
+    justify-content: center;
+    width: auto !important;
+    min-width: 112px;
+    white-space: nowrap;
+    word-break: keep-all;
+    writing-mode: horizontal-tb !important;
+}
+
 #WorldInfo.slb-active .slb-field > small {
     opacity: 0.75;
 }
@@ -308,6 +331,58 @@
     max-width: 100%;
 }
 
+#WorldInfo.slb-active .slb-keyword-assistant {
+    margin-bottom: 10px;
+    padding: 10px;
+    border: 1px solid var(--slb-border);
+    border-radius: 9px;
+    background: var(--slb-surface);
+}
+
+#WorldInfo.slb-active .slb-keyword-head,
+#WorldInfo.slb-active .slb-keyword-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+#WorldInfo.slb-active .slb-keyword-head {
+    justify-content: space-between;
+}
+
+#WorldInfo.slb-active .slb-keyword-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#WorldInfo.slb-active .slb-keyword-help,
+#WorldInfo.slb-active .slb-keyword-status {
+    display: block;
+    margin-top: 5px;
+    opacity: 0.75;
+}
+
+#WorldInfo.slb-active .slb-keyword-results[hidden] {
+    display: none !important;
+}
+
+#WorldInfo.slb-active .slb-keyword-textarea {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 96px;
+    margin-top: 8px;
+    resize: vertical;
+}
+
+#WorldInfo.slb-active .slb-keyword-actions .menu_button {
+    width: auto;
+    min-width: 0;
+    white-space: nowrap;
+    word-break: keep-all;
+}
+
 #WorldInfo.slb-active .slb-busy {
     opacity: 0.65;
     pointer-events: none;
@@ -338,7 +413,24 @@
 
     #WorldInfo.slb-active .slb-ai-fields {
         display: grid;
-        grid-template-columns: minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+    }
+
+    #WorldInfo.slb-active .slb-profile-field {
+        grid-column: 1 / -1;
+        width: 100%;
+        max-width: none;
+    }
+
+    #WorldInfo.slb-active .slb-language-field {
+        grid-column: 1;
+        width: 100%;
+        max-width: none;
+    }
+
+    #WorldInfo.slb-active #slb-test-profile {
+        grid-column: 2;
     }
 }
 
