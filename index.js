@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.1';
+const VERSION = '1.3.2';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)';
@@ -19,6 +19,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
     language: 'Korean',
     translationProvider: 'profile',
+    translationPrompt: '',
     tokenScope: 'active',
     translateMissingOnOpen: true,
     autoTranslateSource: true,
@@ -234,8 +235,12 @@ async function translateText(source) {
         return googleTranslate(source);
     }
     const language = settings.language;
+    const customPrompt = settings.translationPrompt?.trim();
+    const instruction = customPrompt
+        ? customPrompt.replaceAll('{{language}}', language)
+        : `Translate the lorebook entry below into ${language}.`;
     const prompt = [
-        `Translate the lorebook entry below into ${language}.`,
+        instruction,
         protectedTextRules(),
         '',
         '=== SOURCE ===',
@@ -478,6 +483,9 @@ function createAIBar() {
                     </select></label>
                     <button type="button" id="slb-test-profile" class="menu_button"><i class="fa-solid fa-plug-circle-check"></i> 연결 테스트</button>
                 </div>
+                <label class="slb-field slb-prompt-field"><small>번역 프롬프트 · AI 프로필 모드에서만 적용</small>
+                    <textarea id="slb-translate-prompt" class="text_pole" rows="3" placeholder="비워두면 기본 프롬프트를 사용합니다. {{language}}는 번역 언어로 치환됩니다. 구글 번역은 기계번역이라 프롬프트가 적용되지 않습니다."></textarea>
+                </label>
                 <div class="slb-ai-options">
                     <label><input type="checkbox" id="slb-translate-missing"> 번역본 없는 항목을 열 때 자동 번역</label>
                     <label><input type="checkbox" id="slb-auto-translate"> 원문 변경 시 자동 번역</label>
@@ -504,8 +512,14 @@ function createAIBar() {
         document.querySelector('.slb-profile-field')?.classList.toggle('slb-dimmed', usingGoogle);
     }
 
+    const translatePrompt = document.getElementById('slb-translate-prompt');
     provider.value = settings.translationProvider;
     language.value = settings.language;
+    translatePrompt.value = settings.translationPrompt || '';
+    translatePrompt.addEventListener('input', () => {
+        settings.translationPrompt = translatePrompt.value;
+        saveSettingsDebounced();
+    });
     translateMissing.checked = settings.translateMissingOnOpen;
     autoTranslate.checked = settings.autoTranslateSource;
     autoSync.checked = settings.autoSyncToSource;

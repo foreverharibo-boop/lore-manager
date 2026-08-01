@@ -554,9 +554,28 @@
 }
 
 #WorldInfo.slb-active .slb-sync-row {
+    display: flex;
+    flex-flow: row wrap;
+    align-items: center;
+    gap: 6px 10px;
     margin-top: 8px;
     padding-top: 8px;
     border-top: 1px solid var(--slb-border);
+}
+
+/* '지금 번역 반영' 버튼이 좁은 공간에서 세로로 쪼개지지 않게 가로 고정 */
+#WorldInfo.slb-active .slb-apply-translation {
+    display: inline-flex !important;
+    flex: 0 0 auto !important;
+    flex-flow: row nowrap !important;
+    align-items: center;
+    justify-content: center;
+    inline-size: max-content !important;
+    min-inline-size: max-content !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    writing-mode: horizontal-tb !important;
+    padding-inline: 10px !important;
 }
 
 #WorldInfo.slb-active .slb-sync-status {
@@ -852,4 +871,19 @@
 
 #WorldInfo.slb-active .world_entry.slb-selected {
     scroll-margin-top: 8px;
+}
+
+/* v1.3.2 */
+#slb-ai-tools .slb-prompt-field {
+    display: block;
+    width: 100%;
+    max-width: none;
+    margin-top: 8px;
+}
+
+#slb-ai-tools .slb-prompt-field textarea {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 60px;
 }
