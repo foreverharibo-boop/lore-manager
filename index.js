@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.30';
+const VERSION = '1.3.31';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -84,6 +84,8 @@ const state = {
     sourceTimers: new Map(),
     translationTimers: new Map(),
     entryStateSyncTimers: new WeakMap(),
+    headerRecoveryPending: new Set(),
+    headerRecoveryBooks: new Set(),
     responsiveMedia: null,
     responsiveObserver: null,
     responsiveRaf: 0,
@@ -91,7 +93,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-3-30';
+    const styleId = 'slb-critical-layout-1-3-31';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -1321,6 +1323,7 @@ function unbindWorkspaceEntries() {
     }
     state.observer?.disconnect();
     state.observer = null;
+    state.responsiveObserver?.disconnect();
     state.workspace = null;
 }
 
@@ -1332,6 +1335,15 @@ function bindWorkspaceEntries(entries) {
     entries.addEventListener('change', handleWorkspaceEntryInput, true);
     entries.addEventListener('click', handleWorkspaceEntryClick);
 
+    const nativeHeaderAdditions = [
+        '.world_entry',
+        '.world_entry_edit',
+        '#WIEntryHeaderTitlesPC',
+        '.inline-drawer-header:not(.slb-entry-header)',
+        '.world_entry_thin_controls',
+        '.WIEntryTitleAndStatus',
+        '.WIEntryTitleStatus',
+    ].join(',');
     state.observer = new MutationObserver(mutations => {
         // 네이티브 드래그 정렬 중에는 jQuery UI가 헬퍼/플레이스홀더를 만들면서
         // 변이가 쏟아진다. 이때 enhance가 돌면 드래그 중인 DOM을 재구성해서
@@ -1341,11 +1353,23 @@ function bindWorkspaceEntries(entries) {
         let entryChanged = false;
         for (const mutation of mutations) {
             if (mutation.target === entries) listChanged = true;
-            for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+            // ST가 상태 변경 뒤 항목 전체가 아니라 네이티브 헤더만 다시
+            // 만드는 버전도 잡는다. 확장이 스스로 옮기거나 제거하는 .slb-*
+            // 노드는 후보에서 빼서 observer 자기증폭은 만들지 않는다.
+            for (const node of mutation.addedNodes) {
                 if (!(node instanceof Element)) continue;
                 if (
-                    node.matches('.world_entry, .world_entry_edit, #WIEntryHeaderTitlesPC, .slb-mobile-entry-state-badge, .slb-header-grid, .slb-entry-header-shell')
-                    || node.querySelector('.world_entry, .world_entry_edit, .slb-mobile-entry-state-badge, .slb-header-grid, .slb-entry-header-shell')
+                    node.matches(nativeHeaderAdditions)
+                    || node.querySelector(nativeHeaderAdditions)
+                ) {
+                    entryChanged = true;
+                }
+            }
+            for (const node of mutation.removedNodes) {
+                if (!(node instanceof Element)) continue;
+                if (
+                    node.matches('.world_entry, .world_entry_edit, #WIEntryHeaderTitlesPC')
+                    || node.querySelector('.world_entry, .world_entry_edit, #WIEntryHeaderTitlesPC')
                 ) {
                     entryChanged = true;
                 }
@@ -1377,7 +1401,18 @@ function bindWorkspacePopupObserver(popup) {
     state.workspaceObserver?.disconnect();
     state.workspaceObserverTarget = observerTarget;
     state.workspaceObserver = new MutationObserver(mutations => {
-        if (!mutations.some(mutation => mutation.type === 'childList')) return;
+        const relevantMutation = mutations.some(mutation => {
+            if (mutation.type !== 'childList') return false;
+            if (mutation.target === observerTarget || mutation.target?.id === 'world_popup') return true;
+            return [...mutation.addedNodes, ...mutation.removedNodes].some(node => (
+                node instanceof Element
+                && (
+                    node.matches('#world_popup, #world_popup_entries_list, #slb-token-summary-section, #slb-entry-filters-section')
+                    || node.querySelector('#world_popup, #world_popup_entries_list, #slb-token-summary-section, #slb-entry-filters-section')
+                )
+            ));
+        });
+        if (!relevantMutation) return;
 
         const livePopup = document.getElementById('world_popup');
         const liveEntries = document.getElementById('world_popup_entries_list');
@@ -1482,6 +1517,7 @@ function syncEntryHeaderActions(entry) {
 
 function observeResponsiveHeader(entry) {
     if (!state.responsiveObserver || !entry) return;
+    if (state.responsiveMedia?.matches || window.matchMedia('(max-width: 760px)').matches) return;
     for (const element of [
         entry.querySelector('.slb-entry-header-shell'),
         entry.querySelector('.slb-header-toggles'),
@@ -1579,14 +1615,20 @@ function ensureNativeHeaderField(entry, config, className, fallbackLabel) {
 
 function enhanceEntryHeader(entry) {
     if (!entry) return;
+    bindEntryDrawerLifecycle(entry);
     if (entry.dataset.slbHeaderEnhanced === VERSION) {
         const existingShell = entry.querySelector('.slb-entry-header-shell');
         const existingGrid = entry.querySelector('.slb-header-grid');
         const existingTitle = existingGrid?.querySelector('.slb-title-field');
-        if (existingShell && existingGrid && existingTitle) {
+        const existingResponsiveFields = getResponsiveHeaderFields(entry);
+        if (existingShell && existingGrid && existingTitle && existingResponsiveFields.length === 5) {
             syncEntryHeaderActions(entry);
             syncMobileEntryStateBadge(entry);
             observeResponsiveHeader(entry);
+            return;
+        }
+        if (existingShell && existingGrid && existingTitle && existingResponsiveFields.length < 5) {
+            scheduleNativeHeaderRecovery(entry);
             return;
         }
         // SillyTavern may rebuild only the native header after the state select
@@ -1706,20 +1748,6 @@ function enhanceEntryHeader(entry) {
     header.append(shell);
     thinControls?.remove();
 
-    // 모바일 호출 조건에 잠시 옮겨 둔 네이티브 컨트롤은 항목을 접을 때
-    // SillyTavern의 editOutlet 정리 대상이 된다. 접기/펼치기 동작이 시작되기
-    // 전에 영구 헤더 안의 stash로 되돌려 컨트롤 자체가 삭제되지 않게 한다.
-    drawerToggle?.addEventListener('click', () => {
-        const stash = entry.querySelector('.slb-deferred-header-fields');
-        const responsiveFields = getResponsiveHeaderFields(entry);
-        if (stash && responsiveFields.length) stash.append(...responsiveFields);
-        const overview = entry.querySelector('.slb-activation-overview');
-        if (overview) {
-            overview.hidden = true;
-            overview.dataset.slbVisible = 'false';
-        }
-    });
-
     entry.dataset.slbHeaderEnhanced = VERSION;
     syncMobileEntryStateBadge(entry);
     observeResponsiveHeader(entry);
@@ -1758,6 +1786,7 @@ function syncEntryInjectionState(entry) {
         data.vectorized = selector.value === 'vectorized';
     }
     scheduleMobileEntryStateBadgeRepair(entry);
+    restoreMobileActivationOverview(entry);
     renderTokenSummary(currentBookName(), state.currentBookData);
     if ((getSettings().entryFilter || 'all') !== 'all') {
         document.getElementById('world_refresh')?.click();
@@ -1811,6 +1840,76 @@ function getResponsiveHeaderFields(entry) {
     ].filter(Boolean);
 }
 
+function getEntryDrawer(entry) {
+    if (!entry) return null;
+    if (entry.matches?.('.inline-drawer')) return entry;
+    // SillyTavern 1.18의 outer drawer는 .world_entry의 조상이 아니라
+    // .world_entry > form > .inline-drawer 자식이다. 직계 구조를 먼저 찾아
+    // 편집기 안쪽의 Additional Matching Sources drawer와 혼동하지 않는다.
+    return queryCompatible(entry, [
+        ':scope > form.world_entry_form > .inline-drawer',
+        ':scope > form > .inline-drawer',
+        ':scope > .inline-drawer',
+        'form.world_entry_form > .inline-drawer',
+        'form > .inline-drawer',
+    ]) || entry.querySelector('.slb-entry-header')?.closest('.inline-drawer') || null;
+}
+
+function bindEntryDrawerLifecycle(entry) {
+    const drawer = getEntryDrawer(entry);
+    if (!drawer || drawer.dataset.slbDrawerLifecycle === VERSION) return;
+    drawer.dataset.slbDrawerLifecycle = VERSION;
+    // ST가 실제 display 상태를 바꾼 뒤 outer drawer 자체에서 보내는 이벤트다.
+    // nested drawer 이벤트는 버블링되므로 event.target으로 제외한다.
+    drawer.addEventListener('inline-drawer-toggle', event => {
+        if (event.target !== drawer) return;
+        placeResponsiveHeaderFields(entry);
+    });
+}
+
+function isEntryDrawerOpen(entry) {
+    if (!entry) return false;
+    const drawer = getEntryDrawer(entry);
+    if (!drawer) return false;
+    const icon = queryCompatible(drawer, [
+        ':scope > .inline-drawer-header .inline-drawer-icon',
+        ':scope > .inline-drawer-toggle .inline-drawer-icon',
+        '.inline-drawer-icon',
+    ]);
+    if (icon?.classList.contains('down') || icon?.classList.contains('fa-circle-chevron-down')) return false;
+    if (icon?.classList.contains('up') || icon?.classList.contains('fa-circle-chevron-up')) return true;
+    const content = queryCompatible(drawer, [
+        ':scope > .inline-drawer-content',
+        ':scope > .inline-drawer-outlet',
+        '.inline-drawer-outlet',
+    ]);
+    if (!content || content.hidden) return false;
+    return getComputedStyle(content).display !== 'none';
+}
+
+function scheduleNativeHeaderRecovery(entry) {
+    const book = currentBookName();
+    if (
+        !entry?.isConnected
+        || !book
+        || state.headerRecoveryPending.has(book)
+        || state.headerRecoveryBooks.has(book)
+    ) return;
+    state.headerRecoveryPending.add(book);
+    setTimeout(() => {
+        state.headerRecoveryPending.delete(book);
+        if (currentBookName() !== book) return;
+        const stillMissing = renderedEntries().some(item => (
+            item.querySelector('.slb-entry-header-shell')
+            && getResponsiveHeaderFields(item).length !== 5
+        ));
+        if (!stillMissing) return;
+        state.headerRecoveryBooks.add(book);
+        console.warn('[로어북 매니저] 사라진 네이티브 호출 조건 필드를 한 번 복구합니다.');
+        document.getElementById('world_refresh')?.click();
+    }, 1200);
+}
+
 function placeResponsiveHeaderFields(entry, forceCompact = false) {
     if (!entry) return;
     const grid = entry.querySelector('.slb-header-grid');
@@ -1819,25 +1918,26 @@ function placeResponsiveHeaderFields(entry, forceCompact = false) {
     if (!grid || !stash) return;
 
     const fields = getResponsiveHeaderFields(entry);
-    if (!fields.length) {
+    if (fields.length !== 5) {
         if (overview) overview.hidden = true;
-        entry.classList.remove('slb-compact-entry');
+        scheduleNativeHeaderRecovery(entry);
         return;
     }
     const compact = forceCompact || shouldUseCompactHeader(entry);
     const activationActive = Boolean(overview
         ?.closest('.slb-panel[data-panel="activation"]')
         ?.classList.contains('is-active'));
+    const drawerOpen = isEntryDrawerOpen(entry);
     // 좁은 화면에서도 호출 조건 탭을 보고 있을 때만 editOutlet 내부로
     // 이동한다. 그 외에는 삭제되지 않는 헤더 stash에 안전하게 보관한다.
     const target = compact
-        ? (activationActive && overview ? overview : stash)
+        ? (activationActive && drawerOpen && overview?.isConnected ? overview : stash)
         : grid;
     if (fields.some(field => field.parentElement !== target)) target.append(...fields);
     entry.classList.toggle('slb-compact-entry', compact);
     grid.classList.toggle('slb-header-title-only', compact);
     if (overview) {
-        const visible = compact && activationActive && fields.length > 0;
+        const visible = compact && activationActive && drawerOpen && fields.length === 5;
         overview.hidden = !visible;
         overview.dataset.slbVisible = String(visible);
     }
@@ -1851,16 +1951,14 @@ function restoreMobileActivationOverview(entry) {
     const compact = entry.classList.contains('slb-compact-entry') || isNarrowEntryLayout(entry);
     if (!compact) return;
 
+    if (!isEntryDrawerOpen(entry)) {
+        placeResponsiveHeaderFields(entry, true);
+        return;
+    }
+
     // 호출 조건 탭이 열린 뒤 ST가 헤더/폼을 다시 측정해도 최상단 다섯 필드가
     // 숨김 stash로 돌아가지 않도록 원본 컨트롤 노드를 overview에 재부착한다.
     placeResponsiveHeaderFields(entry, true);
-    const overview = entry.querySelector('.slb-activation-overview');
-    if (overview) {
-        overview.hidden = false;
-        overview.removeAttribute('hidden');
-        overview.dataset.slbVisible = 'true';
-    }
-
     // 상단 항목 필터는 사용자가 펼쳐 둔 상태라면 항목 탭 전환 뒤에도 유지한다.
     const filterSection = document.getElementById('slb-entry-filters-section');
     if (filterSection && !getSettings().entryFiltersCollapsed) {
@@ -2661,12 +2759,11 @@ function enhanceEntry(entry) {
     function showTab(name) {
         tabs.forEach(tab => tab.classList.toggle('is-active', tab.dataset.tab === name));
         Object.entries(panels).forEach(([panelName, panel]) => panel.classList.toggle('is-active', panelName === name));
-        // 다른 탭으로 이동하면 컨트롤을 즉시 안전한 헤더 stash로 되돌린다.
-        placeResponsiveHeaderFields(entry);
         if (name === 'activation') {
             restoreMobileActivationOverview(entry);
-            requestAnimationFrame(() => restoreMobileActivationOverview(entry));
-            setTimeout(() => restoreMobileActivationOverview(entry), 60);
+        } else {
+            // 다른 탭으로 이동하면 컨트롤을 즉시 안전한 헤더 stash로 되돌린다.
+            placeResponsiveHeaderFields(entry);
         }
     }
     tabs.forEach(tab => tab.addEventListener('click', () => showTab(tab.dataset.tab)));
@@ -2984,6 +3081,7 @@ function scheduleEntryTokenCount(book, uid, content) {
 
 function syncLiveEditorTokens() {
     if (state.sorting || state.navDragging) return;
+    if (document.visibilityState === 'hidden') return;
     const book = currentBookName();
     if (!book) return;
 
@@ -3029,6 +3127,10 @@ function syncLiveEditorTokens() {
             }
         }
 
+        // 입력/change 이벤트가 실제 편집은 즉시 처리한다. 이 폴링은 이벤트를
+        // 거치지 않은 프로그램적 변경만 보완하므로 열린 항목만 검사한다.
+        // 접힌 모든 원문을 매번 해시하면 긴 로어북에서 모바일 UI가 멎는다.
+        if (!isEntryDrawerOpen(entryElement)) continue;
         const source = entryElement.querySelector('textarea[name="content"]');
         if (!source) continue;
         const sourceHash = hashText(source.value);
@@ -3083,7 +3185,10 @@ async function refreshTokenSummary(forcedData = null) {
         const staleEntries = entries.filter(entry => cache.get(String(entry.uid))?.hash !== hashText(entry.content));
         renderTokenSummary(book, data);
         state.tokenRefreshRunId = runId;
-        await mapLimit(staleEntries, 8, async entry => {
+        // 모바일 WebView에서 토크나이저 8개 동시 실행은 메인 스레드를 오래
+        // 점유한다. 화면 크기에 맞춰 작은 작업 묶음으로 양보한다.
+        const tokenConcurrency = isNarrowEntryLayout() ? 2 : 4;
+        await mapLimit(staleEntries, tokenConcurrency, async entry => {
             const contentHash = hashText(entry.content);
             const count = Number(await getTokenCountAsync(entry.content)) || 0;
             const latest = data.entries?.[entry.uid] ?? data.entries?.[Number(entry.uid)];
@@ -3149,6 +3254,8 @@ function bindEvents() {
         state.navigatorDirty = true;
         state.tokenRunId++;
         state.liveActiveStates.clear();
+        state.headerRecoveryPending.clear();
+        state.headerRecoveryBooks.clear();
         for (const timer of state.entryTokenTimers.values()) clearTimeout(timer);
         state.entryTokenTimers.clear();
         setTokenSummaryPending();
@@ -3192,6 +3299,13 @@ function init() {
     state.responsiveMedia = window.matchMedia('(max-width: 760px)');
     const responsiveListener = () => {
         applyMobileDisplaySettings();
+        if (state.responsiveMedia?.matches) {
+            // 모바일 레이아웃은 폭 임계값으로 고정된다. 각 항목의 크기 변화를
+            // 다시 관찰하면 탭/상태 변경마다 전체 목록 배치가 반복된다.
+            state.responsiveObserver?.disconnect();
+        } else {
+            renderedEntries().forEach(observeResponsiveHeader);
+        }
         scheduleResponsiveEntryLayouts();
     };
     if (typeof state.responsiveMedia.addEventListener === 'function') {
@@ -3201,12 +3315,20 @@ function init() {
     }
     window.addEventListener('resize', responsiveListener, { passive: true });
     if (typeof ResizeObserver === 'function') {
-        state.responsiveObserver = new ResizeObserver(() => scheduleResponsiveEntryLayouts());
+        state.responsiveObserver = new ResizeObserver(records => {
+            if (state.responsiveMedia?.matches) return;
+            const changedEntries = new Set();
+            for (const record of records) {
+                const entry = record.target?.closest?.('.world_entry');
+                if (entry?.isConnected) changedEntries.add(entry);
+            }
+            changedEntries.forEach(placeResponsiveHeaderFields);
+        });
     }
     applyMobileDisplaySettings();
     scheduleEnhance();
     scheduleTokenSummary();
-    state.liveSyncTimer = setInterval(syncLiveEditorTokens, 180);
+    state.liveSyncTimer = setInterval(syncLiveEditorTokens, 1000);
     console.info(`[로어북 매니저] v${VERSION} initialized`);
 }
 
