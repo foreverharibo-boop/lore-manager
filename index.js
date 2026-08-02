@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.29';
+const VERSION = '1.3.30';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -91,7 +91,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-3-29';
+    const styleId = 'slb-critical-layout-1-3-30';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -205,16 +205,12 @@ function syncMobileEntryStateBadge(entry) {
 function repairMobileEntryStateBadge(entry) {
     if (!entry?.isConnected) return;
     syncMobileEntryStateBadge(entry);
-    placeResponsiveHeaderFields(entry);
-    syncMobileEntryStateBadge(entry);
 }
 
 function scheduleMobileEntryStateBadgeRepair(entry) {
     if (!entry) return;
     repairMobileEntryStateBadge(entry);
     requestAnimationFrame(() => repairMobileEntryStateBadge(entry));
-    setTimeout(() => repairMobileEntryStateBadge(entry), 60);
-    setTimeout(() => repairMobileEntryStateBadge(entry), 220);
 }
 
 function applyMobileDisplaySettings() {
@@ -1343,24 +1339,7 @@ function bindWorkspaceEntries(entries) {
         if (state.sorting) return;
         let listChanged = false;
         let entryChanged = false;
-        const badgeRepairEntries = new Set();
         for (const mutation of mutations) {
-            if (
-                mutation.type === 'attributes'
-                && mutation.target instanceof Element
-                && mutation.target.matches('[name="entryKillSwitch"]')
-            ) {
-                syncEntryActiveState(mutation.target.closest('.world_entry'));
-                continue;
-            }
-            if (mutation.type === 'attributes' && mutation.target instanceof Element) {
-                const changedEntry = mutation.target.closest('.world_entry');
-                const isHeaderClassMutation = mutation.target.matches(
-                    '.world_entry, .slb-entry-header-shell, .slb-header-grid',
-                ) || mutation.target.parentElement?.matches('.slb-header-grid');
-                if (changedEntry && isHeaderClassMutation) badgeRepairEntries.add(changedEntry);
-                continue;
-            }
             if (mutation.target === entries) listChanged = true;
             for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
                 if (!(node instanceof Element)) continue;
@@ -1372,11 +1351,10 @@ function bindWorkspaceEntries(entries) {
                 }
             }
         }
-        badgeRepairEntries.forEach(scheduleMobileEntryStateBadgeRepair);
         if (listChanged) state.navigatorDirty = true;
         if (listChanged || entryChanged) scheduleEnhance();
     });
-    state.observer.observe(entries, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    state.observer.observe(entries, { childList: true, subtree: true });
 
     // ST의 jQuery UI sortable은 시작/종료 시 엘리먼트에 sortstart/sortstop을 발생시킨다.
     jQuery(entries)
