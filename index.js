@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.32';
+const VERSION = '1.3.33';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -85,6 +85,8 @@ const state = {
     translationTimers: new Map(),
     entryStateSyncTimers: new WeakMap(),
     entryStateValues: new WeakMap(),
+    compactCache: new WeakMap(),
+    compactEpoch: 0,
     pendingStateFilterRefresh: false,
     headerRecoveryPending: new Set(),
     headerRecoveryLastRefresh: new Map(),
@@ -1300,12 +1302,12 @@ function handleWorkspaceEntryInput(event) {
         'select.world_entry_state',
         'select.entryStateSelector',
     ].join(','));
-    // ST 1.18도 상태 저장에는 input을 사용한다. Android가 직후 별도
-    // change 이벤트까지 보내더라도 같은 변경을 두 번 처리하지 않는다.
+    // ST 1.18의 상태 선택 input 핸들러는 데이터 갱신과 저장만 하며
+    // DOM을 다시 그리지 않는다(드로어를 닫을 때만 지연 정리로 editOutlet을
+    // 비운다). 따라서 여기서 필드를 stash로 회수하면 보호 효과 없이
+    // 호출 조건 첫 줄만 사라지고, 복원 판정이 한 번이라도 어긋나면
+    // 되돌아오지 않는다. 회수는 드로어 닫힘/탭 이탈 경로에서만 수행한다.
     if (isStateSelector && event.type === 'input') {
-        // 상태 select가 editOutlet 안에 있는 채로 다른 확장/버전이 폼을
-        // 다시 그려도 삭제되지 않도록 네이티브 핸들러 실행 전에 회수한다.
-        stashResponsiveHeaderFields(entry);
         scheduleEntryInjectionStateSync(entry);
     }
     if (event.target.matches('textarea[name="content"]')) {
@@ -1808,7 +1810,16 @@ function syncEntryInjectionState(entry) {
         data.vectorized = selectorValue === 'vectorized';
     }
     scheduleMobileEntryStateBadgeRepair(entry);
-    restoreMobileActivationOverview(entry);
+    // 사용자가 방금 overview 안의 셀렉트를 조작했다면 다섯 필드는 이미
+    // 올바른 위치에 있고 드로어도 확실히 열려 있다. 폭/드로어 판정이
+    // 흔들릴 수 있는 재배치를 부르지 않고 표시 상태만 보장한다.
+    const overviewElement = entry.querySelector('.slb-activation-overview');
+    if (overviewElement && selector.closest('.slb-activation-overview') === overviewElement) {
+        overviewElement.hidden = false;
+        overviewElement.dataset.slbVisible = 'true';
+    } else {
+        restoreMobileActivationOverview(entry);
+    }
     if (previousValue === selectorValue) return;
     renderTokenSummary(currentBookName(), state.currentBookData);
     if ((getSettings().entryFilter || 'all') !== 'all') {
@@ -1839,6 +1850,14 @@ function isNarrowEntryLayout(entry) {
 function shouldUseCompactHeader(entry) {
     if (isNarrowEntryLayout(entry)) return true;
 
+    // getBoundingClientRect/scrollWidth 측정은 강제 레이아웃을 유발해
+    // enhance가 돌 때마다 항목 수만큼 쌓이면 모바일에서 버벅인다.
+    // 크기 변화(resize/미디어 전환)가 없는 동안은 판정을 재사용한다.
+    const cached = state.compactCache.get(entry);
+    if (cached && cached.epoch === state.compactEpoch && Date.now() - cached.at < 400) {
+        return cached.value;
+    }
+
     const shell = entry?.querySelector('.slb-entry-header-shell');
     if (!shell) return false;
     const availableWidth = shell.clientWidth || shell.getBoundingClientRect().width;
@@ -1851,7 +1870,9 @@ function shouldUseCompactHeader(entry) {
     const reservedWidth = measuredWidth(entry.querySelector('.slb-header-toggles'))
         + measuredWidth(entry.querySelector('.slb-header-actions'))
         + HEADER_LAYOUT_SAFETY_GAP;
-    return availableWidth < FULL_HEADER_FIELDS_MIN_WIDTH + reservedWidth;
+    const value = availableWidth < FULL_HEADER_FIELDS_MIN_WIDTH + reservedWidth;
+    state.compactCache.set(entry, { at: Date.now(), epoch: state.compactEpoch, value });
+    return value;
 }
 
 function getResponsiveHeaderFields(entry) {
@@ -1911,6 +1932,15 @@ function bindEntryDrawerLifecycle(entry) {
     // nested drawer 이벤트는 버블링되므로 event.target으로 제외한다.
     drawer.addEventListener('inline-drawer-toggle', event => {
         if (event.target !== drawer) return;
+        if (!isEntryDrawerOpen(entry)) {
+            // 닫힘이 확정되면 '보이는 중' 표식을 먼저 지워야
+            // placeResponsiveHeaderFields가 정상적으로 stash 경로를 탄다.
+            const overview = entry.querySelector('.slb-activation-overview');
+            if (overview) {
+                overview.dataset.slbVisible = 'false';
+                overview.hidden = true;
+            }
+        }
         placeResponsiveHeaderFields(entry);
         if (!isEntryDrawerOpen(entry)) {
             setTimeout(flushPendingStateFilterRefresh, 0);
@@ -1981,7 +2011,11 @@ function placeResponsiveHeaderFields(entry, forceCompact = false) {
     const activationActive = Boolean(overview
         ?.closest('.slb-panel[data-panel="activation"]')
         ?.classList.contains('is-active'));
-    const drawerOpen = isEntryDrawerOpen(entry);
+    // overview가 화면에 보이는 중이라면 드로어는 확실히 열려 있다.
+    // 아이콘 클래스 판독이 어긋나는 순간에도 보이는 줄을 stash로
+    // 뺏어가지 않는다. (닫힘은 drawer toggle 이벤트에서 표식을 지운다)
+    const drawerOpen = isEntryDrawerOpen(entry)
+        || (activationActive && overview?.dataset.slbVisible === 'true' && !overview.hidden);
     // 좁은 화면에서도 호출 조건 탭을 보고 있을 때만 editOutlet 내부로
     // 이동한다. 그 외에는 삭제되지 않는 헤더 stash에 안전하게 보관한다.
     const target = compact
@@ -3320,7 +3354,7 @@ function enhanceAll() {
 
 function scheduleEnhance() {
     clearTimeout(state.refreshTimer);
-    state.refreshTimer = setTimeout(enhanceAll, 30);
+    state.refreshTimer = setTimeout(enhanceAll, 60);
 }
 
 function bindEvents() {
@@ -3390,6 +3424,7 @@ function init() {
     bindEvents();
     state.responsiveMedia = window.matchMedia('(max-width: 760px)');
     const responsiveListener = () => {
+        state.compactEpoch++;
         applyMobileDisplaySettings();
         if (state.responsiveMedia?.matches) {
             // 모바일 레이아웃은 폭 임계값으로 고정된다. 각 항목의 크기 변화를
