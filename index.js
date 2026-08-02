@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.31';
+const VERSION = '1.3.32';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -84,8 +84,10 @@ const state = {
     sourceTimers: new Map(),
     translationTimers: new Map(),
     entryStateSyncTimers: new WeakMap(),
+    entryStateValues: new WeakMap(),
+    pendingStateFilterRefresh: false,
     headerRecoveryPending: new Set(),
-    headerRecoveryBooks: new Set(),
+    headerRecoveryLastRefresh: new Map(),
     responsiveMedia: null,
     responsiveObserver: null,
     responsiveRaf: 0,
@@ -93,7 +95,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-3-31';
+    const styleId = 'slb-critical-layout-1-3-32';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -1241,6 +1243,7 @@ function handleEntryFilterClick(event) {
     if (!button || !filters.contains(button)) return;
     const value = button.dataset.filter || 'all';
     getSettings().entryFilter = value;
+    state.pendingStateFilterRefresh = false;
     saveSettingsDebounced();
     syncFilterButtons();
     worldInfoFilter.setFilterData(ENTRY_STATE_FILTER, value);
@@ -1273,11 +1276,12 @@ function ensureWorkspaceSummarySection({ id, bodyId, title, iconClass, settingKe
 }
 
 function scheduleEntryInjectionStateSync(entry) {
-    if (!entry) return;
+    if (!entry?.isConnected) return;
     const previous = state.entryStateSyncTimers.get(entry);
     if (previous) clearTimeout(previous);
     const timer = setTimeout(() => {
         state.entryStateSyncTimers.delete(entry);
+        if (!entry.isConnected) return;
         syncEntryInjectionState(entry);
     }, 0);
     state.entryStateSyncTimers.set(entry, timer);
@@ -1288,14 +1292,20 @@ function handleWorkspaceEntryInput(event) {
     const entry = event.target.closest('.world_entry');
     if (!entry) return;
     const uid = getUid(entry);
-    if (event.target.matches([
+    const isStateSelector = event.target.matches([
         'select[name="entryStateSelector"]',
         'select[name="entryStatus"]',
         'select[name="entryState"]',
         'select.WIEntryStatusSelect',
         'select.world_entry_state',
         'select.entryStateSelector',
-    ].join(','))) {
+    ].join(','));
+    // ST 1.18도 상태 저장에는 input을 사용한다. Android가 직후 별도
+    // change 이벤트까지 보내더라도 같은 변경을 두 번 처리하지 않는다.
+    if (isStateSelector && event.type === 'input') {
+        // 상태 select가 editOutlet 안에 있는 채로 다른 확장/버전이 폼을
+        // 다시 그려도 삭제되지 않도록 네이티브 핸들러 실행 전에 회수한다.
+        stashResponsiveHeaderFields(entry);
         scheduleEntryInjectionStateSync(entry);
     }
     if (event.target.matches('textarea[name="content"]')) {
@@ -1353,6 +1363,13 @@ function bindWorkspaceEntries(entries) {
         let entryChanged = false;
         for (const mutation of mutations) {
             if (mutation.target === entries) listChanged = true;
+            if (
+                mutation.type === 'childList'
+                && mutation.target instanceof Element
+                && mutation.target.matches('.world_entry_edit, .world-entry-edit, [data-role="entry-editor"]')
+            ) {
+                entryChanged = true;
+            }
             // ST가 상태 변경 뒤 항목 전체가 아니라 네이티브 헤더만 다시
             // 만드는 버전도 잡는다. 확장이 스스로 옮기거나 제거하는 .slb-*
             // 노드는 후보에서 빼서 observer 자기증폭은 만들지 않는다.
@@ -1680,6 +1697,7 @@ function enhanceEntryHeader(entry) {
         return;
     }
     delete entry.dataset.slbHeaderWarning;
+    state.entryStateValues.set(entry, stateSelect.value);
 
     titleField.classList.add('slb-header-field', 'slb-title-field');
     titleField.prepend(createElement('small', 'slb-header-label', 'Title/Memo'));
@@ -1770,7 +1788,7 @@ function syncEntryActiveState(entry) {
 }
 
 function syncEntryInjectionState(entry) {
-    if (!entry) return;
+    if (!entry?.isConnected) return;
     const uid = getUid(entry);
     const selector = queryCompatible(entry, [
         'select[name="entryStateSelector"]',
@@ -1780,16 +1798,23 @@ function syncEntryInjectionState(entry) {
         'select.world_entry_state',
         'select.entryStateSelector',
     ]);
+    if (!selector) return;
+    const selectorValue = selector.value;
+    const previousValue = state.entryStateValues.get(entry);
+    state.entryStateValues.set(entry, selectorValue);
     const data = entryData(uid);
-    if (data && selector) {
-        data.constant = selector.value === 'constant';
-        data.vectorized = selector.value === 'vectorized';
+    if (data) {
+        data.constant = selectorValue === 'constant';
+        data.vectorized = selectorValue === 'vectorized';
     }
     scheduleMobileEntryStateBadgeRepair(entry);
     restoreMobileActivationOverview(entry);
+    if (previousValue === selectorValue) return;
     renderTokenSummary(currentBookName(), state.currentBookData);
     if ((getSettings().entryFilter || 'all') !== 'all') {
-        document.getElementById('world_refresh')?.click();
+        // 즉시 전체 목록을 새로고침하면 열린 editOutlet과 탭바가 삭제된다.
+        // 사용자가 항목을 닫은 뒤 lifecycle handler에서 한 번만 적용한다.
+        state.pendingStateFilterRefresh = true;
     }
 }
 
@@ -1840,6 +1865,29 @@ function getResponsiveHeaderFields(entry) {
     ].filter(Boolean);
 }
 
+function stashResponsiveHeaderFields(entry) {
+    if (!entry?.isConnected) return false;
+    const stash = entry.querySelector('.slb-deferred-header-fields');
+    const fields = getResponsiveHeaderFields(entry);
+    if (!stash || fields.length !== 5) return false;
+    if (fields.some(field => field.parentElement !== stash)) stash.append(...fields);
+    const overview = entry.querySelector('.slb-activation-overview');
+    if (overview) {
+        overview.hidden = true;
+        overview.dataset.slbVisible = 'false';
+    }
+    return true;
+}
+
+function flushPendingStateFilterRefresh() {
+    if (!state.pendingStateFilterRefresh) return;
+    // 열린 편집기에서 refresh하면 ST가 tabbar/panel을 통째로 비운다.
+    // 모든 항목을 닫은 뒤 필터 재적용을 한 번만 수행한다.
+    if (renderedEntries().some(isEntryDrawerOpen)) return;
+    state.pendingStateFilterRefresh = false;
+    document.getElementById('world_refresh')?.click();
+}
+
 function getEntryDrawer(entry) {
     if (!entry) return null;
     if (entry.matches?.('.inline-drawer')) return entry;
@@ -1864,6 +1912,9 @@ function bindEntryDrawerLifecycle(entry) {
     drawer.addEventListener('inline-drawer-toggle', event => {
         if (event.target !== drawer) return;
         placeResponsiveHeaderFields(entry);
+        if (!isEntryDrawerOpen(entry)) {
+            setTimeout(flushPendingStateFilterRefresh, 0);
+        }
     });
 }
 
@@ -1889,11 +1940,12 @@ function isEntryDrawerOpen(entry) {
 
 function scheduleNativeHeaderRecovery(entry) {
     const book = currentBookName();
+    const lastRefresh = state.headerRecoveryLastRefresh.get(book) || 0;
     if (
         !entry?.isConnected
         || !book
         || state.headerRecoveryPending.has(book)
-        || state.headerRecoveryBooks.has(book)
+        || Date.now() - lastRefresh < 5000
     ) return;
     state.headerRecoveryPending.add(book);
     setTimeout(() => {
@@ -1904,7 +1956,9 @@ function scheduleNativeHeaderRecovery(entry) {
             && getResponsiveHeaderFields(item).length !== 5
         ));
         if (!stillMissing) return;
-        state.headerRecoveryBooks.add(book);
+        // 열린 drawer의 DOM을 비우지 않는다. 닫기 이벤트에서 다시 검사된다.
+        if (renderedEntries().some(isEntryDrawerOpen)) return;
+        state.headerRecoveryLastRefresh.set(book, Date.now());
         console.warn('[로어북 매니저] 사라진 네이티브 호출 조건 필드를 한 번 복구합니다.');
         document.getElementById('world_refresh')?.click();
     }, 1200);
@@ -2426,10 +2480,30 @@ function createTab(name, label) {
     return button;
 }
 
+function hasCompleteEnhancedEditor(edit) {
+    if (!edit) return false;
+    const directChildren = Array.from(edit.children);
+    const hasTabbar = directChildren.some(child => child.classList.contains('slb-tabbar'));
+    const panelNames = new Set(directChildren
+        .filter(child => child.classList.contains('slb-panel'))
+        .map(child => child.dataset.panel));
+    return hasTabbar && ['content', 'activation', 'group', 'filter'].every(name => panelNames.has(name));
+}
+
 function enhanceEntry(entry) {
     if (!entry) return;
     const edit = queryCompatible(entry, ['.world_entry_edit', '.world-entry-edit', '[data-role="entry-editor"]']);
-    if (!edit || edit.dataset.slbEnhanced === VERSION) return;
+    if (!edit) return;
+    if (edit.dataset.slbEnhanced === VERSION) {
+        if (hasCompleteEnhancedEditor(edit)) return;
+        // ST가 같은 editor 요소의 children만 네이티브 폼으로 교체하면 marker만
+        // 남는다. 확장 구조가 완전히 사라진 경우에만 안전하게 다시 구성한다.
+        const staleCustomStructure = Array.from(edit.children).some(child => (
+            child.classList.contains('slb-tabbar') || child.classList.contains('slb-panel')
+        ));
+        if (staleCustomStructure) return;
+        delete edit.dataset.slbEnhanced;
+    }
 
     const source = findCompatibleControl(edit, {
         names: ['content', 'entryContent'],
@@ -2757,6 +2831,7 @@ function enhanceEntry(entry) {
     placeResponsiveHeaderFields(entry);
 
     function showTab(name) {
+        entry.dataset.slbActiveTab = name;
         tabs.forEach(tab => tab.classList.toggle('is-active', tab.dataset.tab === name));
         Object.entries(panels).forEach(([panelName, panel]) => panel.classList.toggle('is-active', panelName === name));
         if (name === 'activation') {
@@ -2767,7 +2842,10 @@ function enhanceEntry(entry) {
         }
     }
     tabs.forEach(tab => tab.addEventListener('click', () => showTab(tab.dataset.tab)));
-    showTab('content');
+    const savedTab = ['content', 'activation', 'group', 'filter'].includes(entry.dataset.slbActiveTab)
+        ? entry.dataset.slbActiveTab
+        : 'content';
+    showTab(savedTab);
 
     const record = findTranslationRecord(book, uid, source.value);
     if (record?.language === settings.language) {
@@ -3254,15 +3332,19 @@ function bindEvents() {
         state.navigatorDirty = true;
         state.tokenRunId++;
         state.liveActiveStates.clear();
+        state.pendingStateFilterRefresh = false;
         state.headerRecoveryPending.clear();
-        state.headerRecoveryBooks.clear();
+        state.headerRecoveryLastRefresh.clear();
         for (const timer of state.entryTokenTimers.values()) clearTimeout(timer);
         state.entryTokenTimers.clear();
         setTokenSummaryPending();
         scheduleEnhance();
         scheduleTokenSummary(null, 30);
     });
-    document.getElementById('world_refresh')?.addEventListener('click', () => scheduleTokenSummary());
+    document.getElementById('world_refresh')?.addEventListener('click', () => {
+        state.pendingStateFilterRefresh = false;
+        scheduleTokenSummary();
+    });
     document.getElementById('world_popup_new')?.addEventListener('click', () => {
         state.selectedUid = '';
         state.navigatorDirty = true;
@@ -3272,7 +3354,17 @@ function bindEvents() {
 
     if (event_types.WORLDINFO_UPDATED) {
         eventSource.on(event_types.WORLDINFO_UPDATED, (name, data) => {
-            if (name === currentBookName()) scheduleTokenSummary(data, 80);
+            if (name !== currentBookName()) return;
+            scheduleTokenSummary(data, 80);
+            // 일부 ST/확장 조합이 저장 뒤 같은 editor 노드의 내용만 교체해도
+            // stale marker 때문에 탭 재구성을 건너뛰지 않도록 제한적으로 확인한다.
+            const brokenOpenEditor = renderedEntries().some(entry => {
+                if (!isEntryDrawerOpen(entry)) return false;
+                const edit = queryCompatible(entry, ['.world_entry_edit', '.world-entry-edit', '[data-role="entry-editor"]']);
+                return getResponsiveHeaderFields(entry).length !== 5
+                    || (edit?.dataset.slbEnhanced === VERSION && !hasCompleteEnhancedEditor(edit));
+            });
+            if (brokenOpenEditor) scheduleEnhance();
         });
     }
     for (const eventName of ['CONNECTION_PROFILE_CREATED', 'CONNECTION_PROFILE_UPDATED', 'CONNECTION_PROFILE_DELETED']) {
