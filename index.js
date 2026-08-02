@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.33';
+const VERSION = '1.3.34';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -72,6 +72,7 @@ const state = {
     tokenRefreshRunId: 0,
     pendingBookSwitch: '',
     sorting: false,
+    entryDragging: false,
     navDragging: false,
     tokenCache: new Map(),
     tokenCacheTouched: new Map(),
@@ -95,7 +96,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-3-33';
+    const styleId = 'slb-critical-layout-1-3-34';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -1323,12 +1324,295 @@ function handleWorkspaceEntryClick(event) {
     setTimeout(() => syncEntryActiveState(entry), 0);
 }
 
+function renderedEntryChildren(entries) {
+    if (!entries) return [];
+    return Array.from(entries.children).filter(element => (
+        element instanceof Element
+        && element.matches('.world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)')
+        && !element.hidden
+        && element.style.display !== 'none'
+    ));
+}
+
+function getCustomSortControl() {
+    const select = document.getElementById('world_info_sort_order');
+    if (!select) return { select: null, option: null, changed: false };
+    const option = select.querySelector('option[data-rule="custom"]')
+        || Array.from(select.options).find(item => /^(custom|사용자\s*지정)$/i.test(item.textContent.trim()))
+        || Array.from(select.options).find(item => String(item.value) === '13')
+        || null;
+    return { select, option, changed: Boolean(option && select.value !== option.value) };
+}
+
+function selectCustomSortForDrag() {
+    const sort = getCustomSortControl();
+    if (sort.select && sort.option && sort.changed) sort.select.value = sort.option.value;
+    return sort;
+}
+
+function getEntryOrderSlots(items) {
+    const values = items.map(element => {
+        const uid = getUid(element);
+        return Number((state.currentBookData?.entries?.[uid] ?? state.currentBookData?.entries?.[Number(uid)])?.displayIndex);
+    });
+    const finiteValues = values.filter(Number.isFinite);
+    const uniqueValues = new Set(finiteValues);
+    if (finiteValues.length === items.length && uniqueValues.size === items.length) return finiteValues;
+
+    // 오래된 로어북처럼 displayIndex가 비어 있거나 중복된 경우에도 드래그를
+    // 막지 않고, 현재 페이지의 가장 작은 값부터 안전한 연속 순번을 만든다.
+    const first = finiteValues.length ? Math.min(...finiteValues) : 0;
+    return items.map((_element, index) => first + index);
+}
+
+async function commitRenderedEntryOrder(entries, originalSlots, sort) {
+    const book = currentBookName();
+    const data = state.currentBookData;
+    const orderedEntries = renderedEntryChildren(entries);
+    if (!book || state.currentBook !== book || !data?.entries || orderedEntries.length < 2) return;
+
+    const orderedUids = orderedEntries.map(getUid);
+    const slots = [...originalSlots].sort((left, right) => left - right);
+    if (slots.length !== orderedUids.length) return;
+
+    let changed = false;
+    orderedUids.forEach((uid, index) => {
+        const item = data.entries[uid] ?? data.entries[Number(uid)];
+        if (!item) return;
+        const next = slots[index];
+        if (item.displayIndex !== next) {
+            item.displayIndex = next;
+            setWIOriginalDataValue(data, uid, 'extensions.display_index', next);
+            changed = true;
+        }
+    });
+
+    try {
+        if (changed) await saveWorldInfo(book, data);
+        // 다른 정렬 방식에서 바로 끌어도 놓은 순서가 유지되도록, 저장이 끝난
+        // 뒤에만 SillyTavern의 사용자 지정 정렬을 실제로 적용한다.
+        if (sort?.select?.isConnected && sort.option && sort.changed) {
+            sort.select.value = sort.option.value;
+            jQuery(sort.select).trigger('change');
+        }
+        if (changed) notify('항목 순서를 저장했습니다.', 'success');
+    } catch (error) {
+        console.warn('[로어북 매니저] Failed to save dragged entry order', error);
+        notify('항목 순서 저장에 실패했습니다.', 'error');
+    }
+}
+
+function setupEntryListDrag(entries) {
+    if (!entries || entries.dataset.slbEntryDrag === VERSION) return () => {};
+    entries.dataset.slbEntryDrag = VERSION;
+
+    let drag = null;
+    let suppressClick = false;
+    let nativeSortableDisabled = false;
+
+    function setNativeSortableEnabled(enabled) {
+        try {
+            const sortable = jQuery(entries);
+            if (sortable.sortable('instance') === undefined) return;
+            sortable.sortable(enabled ? 'enable' : 'disable');
+            nativeSortableDisabled = !enabled;
+        } catch {
+            nativeSortableDisabled = false;
+        }
+    }
+
+    function getScrollParent(element) {
+        let node = element?.parentElement;
+        while (node && node !== document.body) {
+            const style = getComputedStyle(node);
+            if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight) return node;
+            node = node.parentElement;
+        }
+        return document.scrollingElement || document.documentElement;
+    }
+
+    function activate() {
+        if (!drag || drag.active) return;
+        drag.active = true;
+        drag.sort = selectCustomSortForDrag();
+        drag.scroller = getScrollParent(entries);
+        state.sorting = true;
+        state.entryDragging = true;
+        drag.item.classList.add('slb-entry-drag-active');
+        entries.classList.add('slb-entry-drag-list');
+        if (window.navigator.vibrate && drag.pointerType !== 'mouse') window.navigator.vibrate(10);
+    }
+
+    function restoreOriginalOrder(session) {
+        const elements = new Map(renderedEntryChildren(entries).map(element => [getUid(element), element]));
+        session.originalUids.forEach(uid => {
+            const element = elements.get(uid);
+            if (element) entries.append(element);
+        });
+    }
+
+    function reorderPreview(clientY) {
+        if (!drag?.active) return;
+        const items = renderedEntryChildren(entries).filter(element => element !== drag.item);
+        const before = items.find(element => {
+            const rect = element.getBoundingClientRect();
+            return clientY < rect.top + rect.height / 2;
+        });
+        if (before) entries.insertBefore(drag.item, before);
+        else entries.append(drag.item);
+    }
+
+    function autoScroll(clientY) {
+        const scroller = drag?.scroller;
+        if (!scroller) return;
+        const isRoot = scroller === document.scrollingElement || scroller === document.documentElement;
+        const rect = isRoot ? { top: 0, bottom: window.innerHeight } : scroller.getBoundingClientRect();
+        const zone = Math.min(72, Math.max(42, (rect.bottom - rect.top) * 0.12));
+        if (clientY < rect.top + zone) scroller.scrollTop -= 18;
+        else if (clientY > rect.bottom - zone) scroller.scrollTop += 18;
+    }
+
+    async function cleanup(commit) {
+        if (!drag) return;
+        const session = drag;
+        drag = null;
+        clearTimeout(session.holdTimer);
+        try { session.handle.releasePointerCapture(session.pointerId); } catch { /* ignore */ }
+        session.item.classList.remove('slb-entry-drag-active');
+        entries.classList.remove('slb-entry-drag-list');
+
+        if (!session.active) {
+            if (nativeSortableDisabled) setNativeSortableEnabled(true);
+            return;
+        }
+
+        suppressClick = true;
+        if (!commit) restoreOriginalOrder(session);
+        try {
+            if (commit) await commitRenderedEntryOrder(entries, session.originalSlots, session.sort);
+        } finally {
+            state.sorting = false;
+            state.entryDragging = false;
+            if (nativeSortableDisabled) setNativeSortableEnabled(true);
+            state.navigatorDirty = true;
+            scheduleEnhance();
+        }
+    }
+
+    function onPointerDown(event) {
+        if (!(event.target instanceof Element) || drag || state.entryDragging || state.sorting) return;
+        const handle = event.target.closest('.slb-entry-drag-handle');
+        const item = handle?.closest('.world_entry');
+        if (!handle || !item || item.parentElement !== entries) return;
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+
+        const items = renderedEntryChildren(entries);
+        const slots = getEntryOrderSlots(items);
+        if (items.length < 2) return;
+
+        // 이 확장이 포인터 드래그를 처리하는 동안 네이티브 sortable이 같은
+        // 손잡이를 동시에 잡지 않게 잠시 끈다.
+        setNativeSortableEnabled(false);
+        drag = {
+            item,
+            handle,
+            pointerId: event.pointerId,
+            pointerType: event.pointerType,
+            startX: event.clientX,
+            startY: event.clientY,
+            originalUids: items.map(getUid),
+            originalSlots: [...slots],
+            active: false,
+            holdTimer: null,
+            sort: null,
+            scroller: null,
+        };
+        try { handle.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+        if (event.pointerType !== 'mouse') drag.holdTimer = setTimeout(activate, 320);
+    }
+
+    function onPointerMove(event) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+        if (!drag.active) {
+            if (drag.pointerType === 'mouse' && distance > 3) activate();
+            else if (drag.pointerType !== 'mouse' && distance > 9) {
+                clearTimeout(drag.holdTimer);
+                cleanup(false);
+                return;
+            }
+        }
+        if (!drag?.active) return;
+        event.preventDefault();
+        reorderPreview(event.clientY);
+        autoScroll(event.clientY);
+    }
+
+    function onPointerUp(event) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        cleanup(true);
+    }
+
+    function onPointerCancel(event) {
+        if (!drag || (event.pointerId !== undefined && event.pointerId !== drag.pointerId)) return;
+        cleanup(false);
+    }
+
+    function onClick(event) {
+        if (!suppressClick) return;
+        suppressClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    function onKeyDown(event) {
+        if (!(event.target instanceof Element) || !event.target.closest('.slb-entry-drag-handle')) return;
+        if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        const item = event.target.closest('.world_entry');
+        const items = renderedEntryChildren(entries);
+        const index = items.indexOf(item);
+        const targetIndex = event.key === 'ArrowUp' ? index - 1 : index + 1;
+        if (index < 0 || targetIndex < 0 || targetIndex >= items.length) return;
+        event.preventDefault();
+        const slots = getEntryOrderSlots(items);
+        const sort = selectCustomSortForDrag();
+        if (event.key === 'ArrowUp') entries.insertBefore(item, items[targetIndex]);
+        else entries.insertBefore(items[targetIndex], item);
+        state.sorting = true;
+        state.entryDragging = true;
+        commitRenderedEntryOrder(entries, slots, sort).finally(() => {
+            state.sorting = false;
+            state.entryDragging = false;
+            scheduleEnhance();
+        });
+    }
+
+    entries.addEventListener('pointerdown', onPointerDown, true);
+    entries.addEventListener('pointermove', onPointerMove, true);
+    entries.addEventListener('pointerup', onPointerUp, true);
+    entries.addEventListener('pointercancel', onPointerCancel, true);
+    entries.addEventListener('click', onClick, true);
+    entries.addEventListener('keydown', onKeyDown, true);
+
+    return () => {
+        if (drag) cleanup(false);
+        entries.removeEventListener('pointerdown', onPointerDown, true);
+        entries.removeEventListener('pointermove', onPointerMove, true);
+        entries.removeEventListener('pointerup', onPointerUp, true);
+        entries.removeEventListener('pointercancel', onPointerCancel, true);
+        entries.removeEventListener('click', onClick, true);
+        entries.removeEventListener('keydown', onKeyDown, true);
+        delete entries.dataset.slbEntryDrag;
+    };
+}
+
 function unbindWorkspaceEntries() {
     const previousEntries = state.workspace?.entries;
     if (previousEntries) {
         previousEntries.removeEventListener('input', handleWorkspaceEntryInput, true);
         previousEntries.removeEventListener('change', handleWorkspaceEntryInput, true);
         previousEntries.removeEventListener('click', handleWorkspaceEntryClick);
+        state.workspace?.dragCleanup?.();
         jQuery(previousEntries).off('sortstart.slb sortstop.slb');
     }
     state.observer?.disconnect();
@@ -1344,6 +1628,7 @@ function bindWorkspaceEntries(entries) {
     entries.addEventListener('input', handleWorkspaceEntryInput, true);
     entries.addEventListener('change', handleWorkspaceEntryInput, true);
     entries.addEventListener('click', handleWorkspaceEntryClick);
+    const dragCleanup = setupEntryListDrag(entries);
 
     const nativeHeaderAdditions = [
         '.world_entry',
@@ -1409,7 +1694,7 @@ function bindWorkspaceEntries(entries) {
             scheduleEnhance();
         });
 
-    state.workspace = { entries };
+    state.workspace = { entries, dragCleanup };
 }
 
 function bindWorkspacePopupObserver(popup) {
@@ -1630,6 +1915,23 @@ function ensureNativeHeaderField(entry, config, className, fallbackLabel) {
     return field;
 }
 
+function ensureEntryDragHandle(header, toggles) {
+    if (!header || !toggles) return null;
+    let handle = toggles.querySelector('.slb-entry-drag-handle')
+        || header.querySelector(':scope > .drag-handle')
+        || header.querySelector('.drag-handle');
+    if (!handle) {
+        handle = createElement('span', 'drag-handle menu_button fa-solid fa-grip-vertical');
+    }
+    handle.classList.add('slb-entry-drag-handle');
+    handle.setAttribute('role', 'button');
+    handle.setAttribute('aria-label', '드래그하여 항목 순서 변경');
+    handle.title = '드래그하여 항목 순서 변경';
+    handle.tabIndex = 0;
+    if (handle.parentElement !== toggles) toggles.prepend(handle);
+    return handle;
+}
+
 function enhanceEntryHeader(entry) {
     if (!entry) return;
     bindEntryDrawerLifecycle(entry);
@@ -1639,6 +1941,7 @@ function enhanceEntryHeader(entry) {
         const existingTitle = existingGrid?.querySelector('.slb-title-field');
         const existingResponsiveFields = getResponsiveHeaderFields(entry);
         if (existingShell && existingGrid && existingTitle && existingResponsiveFields.length === 5) {
+            ensureEntryDragHandle(entry.querySelector('.slb-entry-header'), existingShell.querySelector('.slb-header-toggles'));
             syncEntryHeaderActions(entry);
             syncMobileEntryStateBadge(entry);
             observeResponsiveHeader(entry);
@@ -1748,6 +2051,7 @@ function enhanceEntryHeader(entry) {
         || queryCompatible(header, ['[name="entryKillSwitch"]', '.killSwitch', '.world_entry_kill_switch', '[data-action="toggle-active"]']);
     killSwitch?.addEventListener('click', () => setTimeout(() => syncEntryActiveState(entry), 0));
     toggles.append(...[dragHandle, drawerToggle, killSwitch].filter(Boolean));
+    ensureEntryDragHandle(header, toggles);
 
     const deferredFields = createElement('div', 'slb-deferred-header-fields');
     deferredFields.append(...[
