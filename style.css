@@ -293,15 +293,36 @@
 
 /* 항목 제목이나 편집 버튼이 아니라 이 손잡이를 잡았을 때만 순서를 바꾼다. */
 #WorldInfo.slb-active .world_entry .slb-entry-drag-handle {
-    flex: 0 0 20px !important;
-    width: 20px !important;
-    min-width: 20px !important;
-    max-width: 20px !important;
+    flex: 0 0 18px !important;
+    width: 18px !important;
+    min-width: 18px !important;
+    max-width: 18px !important;
     padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: inherit !important;
+    opacity: 0.42;
     cursor: grab;
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
+}
+
+#WorldInfo.slb-active .world_entry .slb-entry-drag-handle::before {
+    content: '' !important;
+    display: block !important;
+    width: 12px !important;
+    height: 1.5px !important;
+    border-radius: 999px;
+    background: currentColor !important;
+    box-shadow: 0 -4px 0 currentColor, 0 4px 0 currentColor !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-entry-drag-handle:hover,
+#WorldInfo.slb-active .world_entry .slb-entry-drag-handle:focus-visible,
+#WorldInfo.slb-active .world_entry.slb-entry-drag-active .slb-entry-drag-handle {
+    opacity: 0.72;
 }
 
 #WorldInfo.slb-active #world_popup_entries_list.slb-entry-drag-list {
@@ -781,11 +802,10 @@
 
 @media (max-width: 760px) {
     #WorldInfo.slb-active .world_entry .slb-entry-drag-handle {
-        flex-basis: 18px !important;
-        width: 18px !important;
-        min-width: 18px !important;
-        max-width: 18px !important;
-        font-size: 0.78em !important;
+        flex-basis: 16px !important;
+        width: 16px !important;
+        min-width: 16px !important;
+        max-width: 16px !important;
     }
 
     #WorldInfo.slb-active .slb-quick-options {

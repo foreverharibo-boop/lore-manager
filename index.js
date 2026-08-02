@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.34';
+const VERSION = '1.3.35';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -96,7 +96,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-3-34';
+    const styleId = 'slb-critical-layout-1-3-35';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -1917,13 +1917,16 @@ function ensureNativeHeaderField(entry, config, className, fallbackLabel) {
 
 function ensureEntryDragHandle(header, toggles) {
     if (!header || !toggles) return null;
-    let handle = toggles.querySelector('.slb-entry-drag-handle')
-        || header.querySelector(':scope > .drag-handle')
-        || header.querySelector('.drag-handle');
+    const handles = Array.from(header.querySelectorAll('.slb-entry-drag-handle, .drag-handle'));
+    let handle = handles.find(element => element.classList.contains('slb-entry-drag-handle'))
+        || handles[0];
     if (!handle) {
-        handle = createElement('span', 'drag-handle menu_button fa-solid fa-grip-vertical');
+        handle = createElement('span', 'drag-handle menu_button');
     }
+    handles.filter(element => element !== handle).forEach(element => element.remove());
+    handle.classList.remove('fa-solid', 'fa-grip-vertical', 'fa-grip-lines');
     handle.classList.add('slb-entry-drag-handle');
+    handle.textContent = '';
     handle.setAttribute('role', 'button');
     handle.setAttribute('aria-label', '드래그하여 항목 순서 변경');
     handle.title = '드래그하여 항목 순서 변경';
