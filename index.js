@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.25';
+const VERSION = '1.3.26';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -35,6 +35,9 @@ const DEFAULT_SETTINGS = Object.freeze({
     quickOptionsLocation: 'lorebook',
     tokenSummaryCollapsed: false,
     entryFiltersCollapsed: false,
+    showMobileEntryState: false,
+    showMobileTokenSummary: true,
+    showMobileEntryFilters: true,
     translateMissingOnOpen: true,
     autoTranslateSource: true,
     autoSyncToSource: true,
@@ -87,7 +90,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-3-25';
+    const styleId = 'slb-critical-layout-1-3-26';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -140,8 +143,62 @@ function getSettings() {
     settings.quickOptionsLocation = settings.quickOptionsLocation === 'extension' ? 'extension' : 'lorebook';
     settings.tokenSummaryCollapsed = Boolean(settings.tokenSummaryCollapsed);
     settings.entryFiltersCollapsed = Boolean(settings.entryFiltersCollapsed);
+    settings.showMobileEntryState = Boolean(settings.showMobileEntryState);
+    settings.showMobileTokenSummary = Boolean(settings.showMobileTokenSummary);
+    settings.showMobileEntryFilters = Boolean(settings.showMobileEntryFilters);
 
     return settings;
+}
+
+function syncMobileEntryStateBadge(entry) {
+    if (!entry) return;
+    const badge = entry.querySelector('.slb-mobile-entry-state-badge');
+    if (!badge) return;
+
+    const selector = queryCompatible(entry, [
+        'select[name="entryStateSelector"]',
+        'select[name="entryStatus"]',
+        'select[name="entryState"]',
+        'select.WIEntryStatusSelect',
+        'select.world_entry_state',
+        'select.entryStateSelector',
+    ]);
+    const data = entryData(getUid(entry));
+    const selectorValue = selector?.value;
+    const value = ['constant', 'normal', 'vectorized'].includes(selectorValue)
+        ? selectorValue
+        : data?.constant
+            ? 'constant'
+            : data?.vectorized
+                ? 'vectorized'
+                : 'normal';
+    const labels = {
+        constant: '상시',
+        normal: '선택',
+        vectorized: '벡터',
+    };
+
+    badge.dataset.state = value;
+    badge.textContent = labels[value];
+    badge.title = value === 'constant'
+        ? '상시 주입'
+        : value === 'vectorized'
+            ? '벡터화'
+            : '선택 주입';
+    badge.setAttribute('aria-label', badge.title);
+}
+
+function applyMobileDisplaySettings() {
+    const worldInfo = document.getElementById('WorldInfo');
+    if (!worldInfo) return;
+    const settings = getSettings();
+
+    // These classes are deliberately consumed only inside the mobile media
+    // query. Their values therefore never alter the desktop lorebook layout.
+    worldInfo.classList.toggle('slb-mobile-entry-state-enabled', settings.showMobileEntryState);
+    worldInfo.classList.toggle('slb-mobile-token-summary-hidden', !settings.showMobileTokenSummary);
+    worldInfo.classList.toggle('slb-mobile-entry-filters-hidden', !settings.showMobileEntryFilters);
+    renderedEntries().forEach(syncMobileEntryStateBadge);
 }
 
 function notify(message, type = 'info') {
@@ -926,6 +983,15 @@ function createAIBar() {
                     <option value="extension">확장 탭</option>
                 </select></label>
                 <div id="slb-quick-options-host"></div>
+                <div class="slb-mobile-display-settings">
+                    <small class="slb-mobile-display-title">모바일 로어북 표시</small>
+                    <div class="slb-mobile-display-options">
+                        <label><input type="checkbox" id="slb-show-mobile-entry-state"> 제목 옆 주입 방식 표시</label>
+                        <label><input type="checkbox" id="slb-show-mobile-token-summary"> 토큰 통계 표시</label>
+                        <label><input type="checkbox" id="slb-show-mobile-entry-filters"> 항목 필터 표시</label>
+                    </div>
+                    <small class="slb-mobile-display-note">이 세 설정은 모바일 화면에만 적용됩니다.</small>
+                </div>
             </div>
         </div>`;
 
@@ -938,6 +1004,11 @@ function createAIBar() {
     const language = document.getElementById('slb-language');
     const outputTokens = document.getElementById('slb-output-tokens');
     const optionsLocation = document.getElementById('slb-options-location');
+    const mobileDisplayControls = [
+        ['slb-show-mobile-entry-state', 'showMobileEntryState'],
+        ['slb-show-mobile-token-summary', 'showMobileTokenSummary'],
+        ['slb-show-mobile-entry-filters', 'showMobileEntryFilters'],
+    ];
 
     function syncProviderUI() {
         const usingGoogle = getSettings().translationProvider === 'google';
@@ -949,6 +1020,16 @@ function createAIBar() {
     language.value = settings.language;
     outputTokens.value = String(settings.aiOutputTokens);
     optionsLocation.value = settings.quickOptionsLocation;
+    for (const [id, key] of mobileDisplayControls) {
+        const input = document.getElementById(id);
+        if (!input) continue;
+        input.checked = settings[key];
+        input.addEventListener('change', () => {
+            settings[key] = input.checked;
+            saveSettingsDebounced();
+            applyMobileDisplaySettings();
+        });
+    }
     translatePrompt.value = settings.translationPrompt || '';
     translatePrompt.addEventListener('input', () => {
         settings.translationPrompt = translatePrompt.value;
@@ -1009,6 +1090,7 @@ function createAIBar() {
         }
     });
     syncQuickTranslationOptionsPlacement();
+    applyMobileDisplaySettings();
 }
 
 function createQuickTranslationOptions() {
@@ -1312,6 +1394,7 @@ function createWorkspace() {
     bindWorkspacePopupObserver(popup);
     syncQuickTranslationOptionsPlacement();
     syncFilterButtons();
+    applyMobileDisplaySettings();
 }
 
 function installEntryStateFilter() {
@@ -1458,6 +1541,7 @@ function enhanceEntryHeader(entry) {
     if (!entry) return;
     if (entry.dataset.slbHeaderEnhanced === VERSION) {
         syncEntryHeaderActions(entry);
+        syncMobileEntryStateBadge(entry);
         observeResponsiveHeader(entry);
         return;
     }
@@ -1546,6 +1630,7 @@ function enhanceEntryHeader(entry) {
     const shell = createElement('div', 'slb-entry-header-shell');
     const toggles = createElement('div', 'slb-header-toggles');
     const fields = createElement('div', 'slb-header-grid');
+    const mobileStateBadge = createElement('span', 'slb-mobile-entry-state-badge');
     const actions = createElement('div', 'slb-header-actions');
     const dragHandle = header.querySelector(':scope > .drag-handle');
     const drawerToggle = queryCompatible(thinControls, ['.inline-drawer-toggle', '.world_entry_drawer_toggle', '[data-action="toggle-entry"]'])
@@ -1563,7 +1648,7 @@ function enhanceEntryHeader(entry) {
         orderField,
         triggerField,
     ].filter(Boolean));
-    fields.append(titleField);
+    fields.append(titleField, mobileStateBadge);
 
     const nativeActions = Array.from(header.children).filter(child => child.classList?.contains('menu_button'));
     actions.append(...nativeActions);
@@ -1587,6 +1672,7 @@ function enhanceEntryHeader(entry) {
     });
 
     entry.dataset.slbHeaderEnhanced = VERSION;
+    syncMobileEntryStateBadge(entry);
     observeResponsiveHeader(entry);
     placeResponsiveHeaderFields(entry);
 }
@@ -1615,6 +1701,7 @@ function syncEntryInjectionState(entry) {
         data.constant = selector.value === 'constant';
         data.vectorized = selector.value === 'vectorized';
     }
+    syncMobileEntryStateBadge(entry);
     renderTokenSummary(currentBookName(), state.currentBookData);
     if ((getSettings().entryFilter || 'all') !== 'all') {
         document.getElementById('world_refresh')?.click();
@@ -2981,6 +3068,7 @@ function enhanceAll() {
         enhanceEntry(entry);
     });
     syncResponsiveEntryLayouts();
+    applyMobileDisplaySettings();
     syncFilterButtons();
     syncAutoControls();
 
@@ -3046,7 +3134,10 @@ function init() {
     createWorkspace();
     bindEvents();
     state.responsiveMedia = window.matchMedia('(max-width: 760px)');
-    const responsiveListener = () => scheduleResponsiveEntryLayouts();
+    const responsiveListener = () => {
+        applyMobileDisplaySettings();
+        scheduleResponsiveEntryLayouts();
+    };
     if (typeof state.responsiveMedia.addEventListener === 'function') {
         state.responsiveMedia.addEventListener('change', responsiveListener);
     } else if (typeof state.responsiveMedia.addListener === 'function') {
@@ -3056,6 +3147,7 @@ function init() {
     if (typeof ResizeObserver === 'function') {
         state.responsiveObserver = new ResizeObserver(() => scheduleResponsiveEntryLayouts());
     }
+    applyMobileDisplaySettings();
     scheduleEnhance();
     scheduleTokenSummary();
     state.liveSyncTimer = setInterval(syncLiveEditorTokens, 180);
