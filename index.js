@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.26';
+const VERSION = '1.3.27';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -90,7 +90,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-3-26';
+    const styleId = 'slb-critical-layout-1-3-27';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -172,14 +172,8 @@ function syncMobileEntryStateBadge(entry) {
             : data?.vectorized
                 ? 'vectorized'
                 : 'normal';
-    const labels = {
-        constant: '상시',
-        normal: '선택',
-        vectorized: '벡터',
-    };
-
     badge.dataset.state = value;
-    badge.textContent = labels[value];
+    badge.textContent = '';
     badge.title = value === 'constant'
         ? '상시 주입'
         : value === 'vectorized'
