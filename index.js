@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.28';
+const VERSION = '1.3.29';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -91,7 +91,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-3-28';
+    const styleId = 'slb-critical-layout-1-3-29';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -115,12 +115,16 @@ function ensureCriticalLayoutStyles() {
 #slb-ai-tools #slb-quick-options-host>.slb-quick-options>label:last-child{grid-column:1/-1!important}
 #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-panel[data-panel="activation"].is-active>.slb-activation-overview[data-slb-visible="true"]:not(:empty){display:grid!important;visibility:visible!important;opacity:1!important}
 @media(max-width:760px){
-#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-header-title-only{display:grid!important;grid-template-columns:minmax(0,1fr) 18px!important;grid-template-rows:29px!important;gap:5px!important;align-items:stretch!important}
-#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-header-title-only>.slb-title-field{grid-column:1!important;grid-row:1!important;min-width:0!important}
-#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-mobile-entry-state-badge{display:inline-flex!important;box-sizing:border-box!important;grid-column:2!important;grid-row:1!important;width:18px!important;min-width:18px!important;height:29px!important;margin:0!important;padding:0!important;align-items:center!important;justify-content:center!important;border:0!important;background:transparent!important;visibility:visible!important;opacity:1!important}
-#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-mobile-entry-state-badge:before{content:"";display:block!important;width:12px!important;height:12px!important;border-radius:50%!important;background:linear-gradient(145deg,#73eba4,#2bbd6c)!important;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)!important}
-#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-mobile-entry-state-badge[data-state="constant"]:before{background:linear-gradient(145deg,#72b8ff,#2563eb)!important}
-#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-mobile-entry-state-badge[data-state="vectorized"]:before{content:"🔗"!important;width:auto!important;height:auto!important;border-radius:0!important;background:none!important;box-shadow:none!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 18px auto!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-header-grid{display:grid!important;box-sizing:border-box!important;grid-column:2!important;grid-row:1!important;grid-template-columns:minmax(0,1fr)!important;grid-template-rows:29px!important;gap:0!important;align-items:stretch!important;width:100%!important;min-width:0!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-header-grid>.slb-title-field{display:block!important;grid-column:1!important;grid-row:1!important;width:100%!important;min-width:0!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-header-grid>.slb-title-field>.slb-header-label{display:none!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-header-grid>.slb-title-field>textarea{display:block!important;box-sizing:border-box!important;width:100%!important;height:29px!important;min-height:29px!important;max-height:29px!important;margin:0!important;overflow:hidden!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge{display:inline-flex!important;box-sizing:border-box!important;grid-column:3!important;grid-row:1!important;width:18px!important;min-width:18px!important;max-width:18px!important;height:29px!important;margin:0!important;padding:0!important;align-items:center!important;justify-content:center!important;border:0!important;background:transparent!important;visibility:visible!important;opacity:1!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-header-actions{grid-column:4!important;grid-row:1!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge:before{content:"";display:block!important;width:12px!important;height:12px!important;border-radius:50%!important;background:linear-gradient(145deg,#73eba4,#2bbd6c)!important;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="constant"]:before{background:linear-gradient(145deg,#72b8ff,#2563eb)!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="vectorized"]:before{content:"🔗"!important;width:auto!important;height:auto!important;border-radius:0!important;background:none!important;box-shadow:none!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:36px var(--slb-slot-h) 28px!important;column-gap:12px!important;padding:0!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot{height:36px!important;padding:0 2px!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] .slb-filter-title{font-size:clamp(10px,2.45vw,.76em)!important;line-height:1.12!important;white-space:normal!important;overflow-wrap:break-word!important}
@@ -159,11 +163,16 @@ function getSettings() {
 
 function syncMobileEntryStateBadge(entry) {
     if (!entry) return;
-    const grid = entry.querySelector('.slb-header-grid');
-    if (!grid) return;
-    let badge = entry.querySelector('.slb-mobile-entry-state-badge');
+    const shell = entry.querySelector('.slb-entry-header-shell');
+    if (!shell) return;
+    const existingBadges = Array.from(entry.querySelectorAll('.slb-mobile-entry-state-badge'));
+    let badge = existingBadges.shift();
     if (!badge) badge = createElement('span', 'slb-mobile-entry-state-badge');
-    if (badge.parentElement !== grid) grid.append(badge);
+    existingBadges.forEach(duplicate => duplicate.remove());
+    if (badge.parentElement !== shell) {
+        const actions = shell.querySelector(':scope > .slb-header-actions');
+        actions ? shell.insertBefore(badge, actions) : shell.append(badge);
+    }
     if (!badge) return;
 
     const selector = queryCompatible(entry, [
@@ -1334,6 +1343,7 @@ function bindWorkspaceEntries(entries) {
         if (state.sorting) return;
         let listChanged = false;
         let entryChanged = false;
+        const badgeRepairEntries = new Set();
         for (const mutation of mutations) {
             if (
                 mutation.type === 'attributes'
@@ -1341,6 +1351,14 @@ function bindWorkspaceEntries(entries) {
                 && mutation.target.matches('[name="entryKillSwitch"]')
             ) {
                 syncEntryActiveState(mutation.target.closest('.world_entry'));
+                continue;
+            }
+            if (mutation.type === 'attributes' && mutation.target instanceof Element) {
+                const changedEntry = mutation.target.closest('.world_entry');
+                const isHeaderClassMutation = mutation.target.matches(
+                    '.world_entry, .slb-entry-header-shell, .slb-header-grid',
+                ) || mutation.target.parentElement?.matches('.slb-header-grid');
+                if (changedEntry && isHeaderClassMutation) badgeRepairEntries.add(changedEntry);
                 continue;
             }
             if (mutation.target === entries) listChanged = true;
@@ -1354,6 +1372,7 @@ function bindWorkspaceEntries(entries) {
                 }
             }
         }
+        badgeRepairEntries.forEach(scheduleMobileEntryStateBadgeRepair);
         if (listChanged) state.navigatorDirty = true;
         if (listChanged || entryChanged) scheduleEnhance();
     });
@@ -1700,11 +1719,11 @@ function enhanceEntryHeader(entry) {
         orderField,
         triggerField,
     ].filter(Boolean));
-    fields.append(titleField, mobileStateBadge);
+    fields.append(titleField);
 
     const nativeActions = Array.from(header.children).filter(child => child.classList?.contains('menu_button'));
     actions.append(...nativeActions);
-    shell.append(toggles, fields, actions, deferredFields);
+    shell.append(toggles, fields, mobileStateBadge, actions, deferredFields);
     header.classList.add('slb-entry-header');
     header.append(shell);
     thinControls?.remove();
