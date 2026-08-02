@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.3.27';
+const VERSION = '1.3.28';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -83,6 +83,7 @@ const state = {
     navigatorSignature: '',
     sourceTimers: new Map(),
     translationTimers: new Map(),
+    entryStateSyncTimers: new WeakMap(),
     responsiveMedia: null,
     responsiveObserver: null,
     responsiveRaf: 0,
@@ -90,7 +91,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-3-27';
+    const styleId = 'slb-critical-layout-1-3-28';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -114,6 +115,12 @@ function ensureCriticalLayoutStyles() {
 #slb-ai-tools #slb-quick-options-host>.slb-quick-options>label:last-child{grid-column:1/-1!important}
 #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-panel[data-panel="activation"].is-active>.slb-activation-overview[data-slb-visible="true"]:not(:empty){display:grid!important;visibility:visible!important;opacity:1!important}
 @media(max-width:760px){
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-header-title-only{display:grid!important;grid-template-columns:minmax(0,1fr) 18px!important;grid-template-rows:29px!important;gap:5px!important;align-items:stretch!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-header-title-only>.slb-title-field{grid-column:1!important;grid-row:1!important;min-width:0!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-mobile-entry-state-badge{display:inline-flex!important;box-sizing:border-box!important;grid-column:2!important;grid-row:1!important;width:18px!important;min-width:18px!important;height:29px!important;margin:0!important;padding:0!important;align-items:center!important;justify-content:center!important;border:0!important;background:transparent!important;visibility:visible!important;opacity:1!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-mobile-entry-state-badge:before{content:"";display:block!important;width:12px!important;height:12px!important;border-radius:50%!important;background:linear-gradient(145deg,#73eba4,#2bbd6c)!important;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-mobile-entry-state-badge[data-state="constant"]:before{background:linear-gradient(145deg,#72b8ff,#2563eb)!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-mobile-entry-state-badge[data-state="vectorized"]:before{content:"🔗"!important;width:auto!important;height:auto!important;border-radius:0!important;background:none!important;box-shadow:none!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:36px var(--slb-slot-h) 28px!important;column-gap:12px!important;padding:0!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot{height:36px!important;padding:0 2px!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] .slb-filter-title{font-size:clamp(10px,2.45vw,.76em)!important;line-height:1.12!important;white-space:normal!important;overflow-wrap:break-word!important}
@@ -152,7 +159,11 @@ function getSettings() {
 
 function syncMobileEntryStateBadge(entry) {
     if (!entry) return;
-    const badge = entry.querySelector('.slb-mobile-entry-state-badge');
+    const grid = entry.querySelector('.slb-header-grid');
+    if (!grid) return;
+    let badge = entry.querySelector('.slb-mobile-entry-state-badge');
+    if (!badge) badge = createElement('span', 'slb-mobile-entry-state-badge');
+    if (badge.parentElement !== grid) grid.append(badge);
     if (!badge) return;
 
     const selector = queryCompatible(entry, [
@@ -180,6 +191,21 @@ function syncMobileEntryStateBadge(entry) {
             ? '벡터화'
             : '선택 주입';
     badge.setAttribute('aria-label', badge.title);
+}
+
+function repairMobileEntryStateBadge(entry) {
+    if (!entry?.isConnected) return;
+    syncMobileEntryStateBadge(entry);
+    placeResponsiveHeaderFields(entry);
+    syncMobileEntryStateBadge(entry);
+}
+
+function scheduleMobileEntryStateBadgeRepair(entry) {
+    if (!entry) return;
+    repairMobileEntryStateBadge(entry);
+    requestAnimationFrame(() => repairMobileEntryStateBadge(entry));
+    setTimeout(() => repairMobileEntryStateBadge(entry), 60);
+    setTimeout(() => repairMobileEntryStateBadge(entry), 220);
 }
 
 function applyMobileDisplaySettings() {
@@ -1239,13 +1265,31 @@ function ensureWorkspaceSummarySection({ id, bodyId, title, iconClass, settingKe
     return { section, body };
 }
 
+function scheduleEntryInjectionStateSync(entry) {
+    if (!entry) return;
+    const previous = state.entryStateSyncTimers.get(entry);
+    if (previous) clearTimeout(previous);
+    const timer = setTimeout(() => {
+        state.entryStateSyncTimers.delete(entry);
+        syncEntryInjectionState(entry);
+    }, 0);
+    state.entryStateSyncTimers.set(entry, timer);
+}
+
 function handleWorkspaceEntryInput(event) {
     if (!(event.target instanceof Element)) return;
     const entry = event.target.closest('.world_entry');
     if (!entry) return;
     const uid = getUid(entry);
-    if (event.target.matches('select[name="entryStateSelector"]')) {
-        setTimeout(() => syncEntryInjectionState(entry), 0);
+    if (event.target.matches([
+        'select[name="entryStateSelector"]',
+        'select[name="entryStatus"]',
+        'select[name="entryState"]',
+        'select.WIEntryStatusSelect',
+        'select.world_entry_state',
+        'select.entryStateSelector',
+    ].join(','))) {
+        scheduleEntryInjectionStateSync(entry);
     }
     if (event.target.matches('textarea[name="content"]')) {
         scheduleEntryTokenCount(currentBookName(), uid, event.target.value);
@@ -1266,6 +1310,7 @@ function unbindWorkspaceEntries() {
     const previousEntries = state.workspace?.entries;
     if (previousEntries) {
         previousEntries.removeEventListener('input', handleWorkspaceEntryInput, true);
+        previousEntries.removeEventListener('change', handleWorkspaceEntryInput, true);
         previousEntries.removeEventListener('click', handleWorkspaceEntryClick);
         jQuery(previousEntries).off('sortstart.slb sortstop.slb');
     }
@@ -1279,6 +1324,7 @@ function bindWorkspaceEntries(entries) {
     unbindWorkspaceEntries();
 
     entries.addEventListener('input', handleWorkspaceEntryInput, true);
+    entries.addEventListener('change', handleWorkspaceEntryInput, true);
     entries.addEventListener('click', handleWorkspaceEntryClick);
 
     state.observer = new MutationObserver(mutations => {
@@ -1300,7 +1346,10 @@ function bindWorkspaceEntries(entries) {
             if (mutation.target === entries) listChanged = true;
             for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
                 if (!(node instanceof Element)) continue;
-                if (node.matches('.world_entry, .world_entry_edit, #WIEntryHeaderTitlesPC') || node.querySelector('.world_entry, .world_entry_edit')) {
+                if (
+                    node.matches('.world_entry, .world_entry_edit, #WIEntryHeaderTitlesPC, .slb-mobile-entry-state-badge, .slb-header-grid, .slb-entry-header-shell')
+                    || node.querySelector('.world_entry, .world_entry_edit, .slb-mobile-entry-state-badge, .slb-header-grid, .slb-entry-header-shell')
+                ) {
                     entryChanged = true;
                 }
             }
@@ -1534,10 +1583,19 @@ function ensureNativeHeaderField(entry, config, className, fallbackLabel) {
 function enhanceEntryHeader(entry) {
     if (!entry) return;
     if (entry.dataset.slbHeaderEnhanced === VERSION) {
-        syncEntryHeaderActions(entry);
-        syncMobileEntryStateBadge(entry);
-        observeResponsiveHeader(entry);
-        return;
+        const existingShell = entry.querySelector('.slb-entry-header-shell');
+        const existingGrid = entry.querySelector('.slb-header-grid');
+        const existingTitle = existingGrid?.querySelector('.slb-title-field');
+        if (existingShell && existingGrid && existingTitle) {
+            syncEntryHeaderActions(entry);
+            syncMobileEntryStateBadge(entry);
+            observeResponsiveHeader(entry);
+            return;
+        }
+        // SillyTavern may rebuild only the native header after the state select
+        // changes while leaving our version marker on the entry. Clear the
+        // stale marker so the complete header can be reconstructed below.
+        delete entry.dataset.slbHeaderEnhanced;
     }
 
     const stateSelect = findCompatibleControl(entry, {
@@ -1689,13 +1747,20 @@ function syncEntryActiveState(entry) {
 function syncEntryInjectionState(entry) {
     if (!entry) return;
     const uid = getUid(entry);
-    const selector = entry.querySelector('select[name="entryStateSelector"]');
+    const selector = queryCompatible(entry, [
+        'select[name="entryStateSelector"]',
+        'select[name="entryStatus"]',
+        'select[name="entryState"]',
+        'select.WIEntryStatusSelect',
+        'select.world_entry_state',
+        'select.entryStateSelector',
+    ]);
     const data = entryData(uid);
     if (data && selector) {
         data.constant = selector.value === 'constant';
         data.vectorized = selector.value === 'vectorized';
     }
-    syncMobileEntryStateBadge(entry);
+    scheduleMobileEntryStateBadgeRepair(entry);
     renderTokenSummary(currentBookName(), state.currentBookData);
     if ((getSettings().entryFilter || 'all') !== 'all') {
         document.getElementById('world_refresh')?.click();
