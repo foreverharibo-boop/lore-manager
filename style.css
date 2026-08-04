@@ -5,6 +5,127 @@
     --slb-accent: var(--SmartThemeQuoteColor, var(--SmartThemeEmColor, currentColor));
 }
 
+/* 로어북 전용 로컬 백업 */
+#slb-ai-tools .slb-backup-settings {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+}
+
+#slb-ai-tools .slb-backup-settings > summary {
+    display: flex;
+    min-height: 32px;
+    padding: 4px 2px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    list-style: none;
+    font-weight: 600;
+}
+
+#slb-ai-tools .slb-backup-settings > summary::-webkit-details-marker {
+    display: none;
+}
+
+#slb-ai-tools .slb-backup-settings > summary small {
+    opacity: 0.72;
+    font-weight: 400;
+}
+
+#slb-ai-tools .slb-backup-body {
+    display: grid;
+    gap: 8px;
+    padding: 6px 0 2px;
+}
+
+#slb-ai-tools .slb-backup-toolbar,
+#slb-ai-tools .slb-backup-toolbar-actions {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+}
+
+#slb-ai-tools .slb-backup-toolbar {
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+#slb-ai-tools .slb-backup-toolbar > label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+#slb-ai-tools .slb-backup-note,
+#slb-ai-tools .slb-backup-meta,
+#slb-ai-tools .slb-backup-empty {
+    opacity: 0.72;
+    font-weight: 400;
+}
+
+#slb-ai-tools .slb-backup-list {
+    display: grid;
+    max-height: 320px;
+    overflow: auto;
+    gap: 6px;
+}
+
+#slb-ai-tools .slb-backup-row {
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) auto;
+    gap: 8px;
+    padding: 7px;
+    align-items: center;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+}
+
+#slb-ai-tools .slb-backup-info {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+}
+
+#slb-ai-tools .slb-backup-book,
+#slb-ai-tools .slb-backup-meta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#slb-ai-tools .slb-backup-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+#slb-ai-tools .slb-backup-actions .menu_button,
+#slb-ai-tools .slb-backup-toolbar-actions .menu_button {
+    min-height: 28px;
+    padding: 3px 7px;
+    white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+    #slb-ai-tools .slb-backup-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    #slb-ai-tools .slb-backup-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    #slb-ai-tools .slb-backup-actions .menu_button {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
 #WorldInfo.slb-active #wiTopBlock {
     order: 0;
 }
