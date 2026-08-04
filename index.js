@@ -2,6 +2,7 @@ import {
     eventSource,
     event_types,
     saveSettingsDebounced,
+    saveSettings,
     getRequestHeaders,
 } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
@@ -11,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.7';
+const VERSION = '1.4.8';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -1090,12 +1091,11 @@ function clearVisibleTranslations() {
 }
 
 async function flushExtensionSettings() {
-    const result = saveSettingsDebounced();
-    if (result instanceof Promise) await result;
-    if (typeof saveSettingsDebounced.flush === 'function') {
-        const flushed = saveSettingsDebounced.flush();
-        if (flushed instanceof Promise) await flushed;
-    }
+    // ST의 saveSettingsDebounced는 1초 뒤 실행을 '예약'만 하고 즉시 반환하며,
+    // ST debounce에는 flush가 없다. 초기화 직후 새로고침(450ms)이 예약된
+    // 저장보다 먼저 일어나면 삭제가 서버 settings.json에 반영되지 않아
+    // 설정이 부활하므로, 즉시 저장을 직접 await한다.
+    await saveSettings();
 }
 
 async function clearTranslationStorage({ refreshUI = true } = {}) {
