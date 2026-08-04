@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.1';
+const VERSION = '1.4.5';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -28,8 +28,9 @@ const BACKUP_DB_NAME = 'simple-lorebook-backups';
 const BACKUP_DB_VERSION = 1;
 const BACKUP_STORE_NAME = 'lorebook-backups';
 const BACKUP_SCHEMA_VERSION = 1;
-const BACKUP_MIN_INTERVAL = 5 * 60 * 1000;
-const BACKUP_RETENTION_PER_BOOK = 20;
+const BACKUP_IDLE_DELAY = 3 * 60 * 1000;
+const BACKUP_CONTINUOUS_INTERVAL = 30 * 60 * 1000;
+const BACKUP_RETENTION_TOTAL = 20;
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
     language: 'Korean',
@@ -98,6 +99,8 @@ const state = {
     backupOpenPromises: new Map(),
     backupRestoreInProgress: false,
     backupRenderRunId: 0,
+    extensionDataCleaning: false,
+    worldSelectUserIntentUntil: 0,
     responsiveMedia: null,
     responsiveObserver: null,
     responsiveRaf: 0,
@@ -105,7 +108,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-4-1';
+    const styleId = 'slb-critical-layout-1-4-5';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -1060,6 +1063,93 @@ async function deleteLorebookBackup(id) {
     }
 }
 
+async function clearAllLorebookBackups() {
+    if (!globalThis.indexedDB) return;
+    const database = await openBackupDatabase();
+    try {
+        const transaction = database.transaction(BACKUP_STORE_NAME, 'readwrite');
+        transaction.objectStore(BACKUP_STORE_NAME).clear();
+        await backupTransactionDone(transaction);
+    } finally {
+        database.close();
+    }
+    state.backupRenderRunId += 1;
+    const count = document.getElementById('slb-backup-count');
+    const list = document.getElementById('slb-backup-list');
+    if (count) count.textContent = '0개';
+    if (list) list.replaceChildren();
+}
+
+function clearVisibleTranslations() {
+    document.querySelectorAll('.slb-translation-text').forEach(textarea => {
+        textarea.value = '';
+    });
+    document.querySelectorAll('.slb-translation-status').forEach(status => {
+        status.textContent = '번역본이 없습니다.';
+    });
+}
+
+async function flushExtensionSettings() {
+    const result = saveSettingsDebounced();
+    if (result instanceof Promise) await result;
+    if (typeof saveSettingsDebounced.flush === 'function') {
+        const flushed = saveSettingsDebounced.flush();
+        if (flushed instanceof Promise) await flushed;
+    }
+}
+
+async function clearTranslationStorage({ refreshUI = true } = {}) {
+    const settings = extension_settings[EXTENSION_NAME];
+    if (settings && typeof settings === 'object') settings.translations = {};
+    state.translationTimers.forEach(timer => clearTimeout(timer));
+    state.translationTimers.clear();
+    if (refreshUI) clearVisibleTranslations();
+    await flushExtensionSettings();
+}
+
+async function resetExtensionStorage({ refreshUI = false } = {}) {
+    if (state.extensionDataCleaning) return;
+    state.extensionDataCleaning = true;
+    state.backupRestoreInProgress = true;
+    clearAllAutomaticBackupSchedules();
+    state.sourceTimers.forEach(timer => clearTimeout(timer));
+    state.translationTimers.forEach(timer => clearTimeout(timer));
+    state.entryTokenTimers.forEach(timer => clearTimeout(timer));
+    state.sourceTimers.clear();
+    state.translationTimers.clear();
+    state.entryTokenTimers.clear();
+    if (state.tokenCachePersistTimer) clearTimeout(state.tokenCachePersistTimer);
+    state.tokenCachePersistTimer = null;
+    await Promise.allSettled(Array.from(state.backupOpenPromises.values()));
+    state.backupOpenPromises.clear();
+    try {
+        await clearAllLorebookBackups();
+    } catch (error) {
+        console.warn('[로어북 매니저] 로컬 백업 정리 실패', error);
+    }
+    state.tokenCache.clear();
+    state.tokenCacheTouched.clear();
+    try {
+        localStorage.removeItem(TOKEN_CACHE_STORAGE_KEY);
+    } catch (error) {
+        console.warn('[로어북 매니저] 토큰 캐시 정리 실패', error);
+    }
+    delete extension_settings[EXTENSION_NAME];
+    if (refreshUI) clearVisibleTranslations();
+    await flushExtensionSettings();
+}
+
+// SillyTavern 1.18+ invokes these manifest hooks before cleaning/deleting the
+// extension. Keeping them exported also lets the extension manager await the
+// IndexedDB cleanup before it removes this module from disk.
+export async function cleanExtensionData() {
+    await resetExtensionStorage();
+}
+
+export async function deleteExtensionData() {
+    await resetExtensionStorage();
+}
+
 function backupId() {
     return globalThis.crypto?.randomUUID?.()
         || `slb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
@@ -1099,9 +1189,9 @@ function backupSnapshotHash(lorebook, translations) {
     return hashText(JSON.stringify({ lorebook, translations }));
 }
 
-async function pruneLorebookBackups(book) {
-    const records = (await listLorebookBackups()).filter(record => record.book === book);
-    const expired = records.slice(BACKUP_RETENTION_PER_BOOK);
+async function pruneLorebookBackups() {
+    const records = await listLorebookBackups();
+    const expired = records.slice(BACKUP_RETENTION_TOTAL);
     for (const record of expired) await deleteLorebookBackup(record.id);
 }
 
@@ -1114,10 +1204,6 @@ async function createLorebookBackup(book, { reason = 'manual', force = false, da
     const existing = (await listLorebookBackups()).filter(record => record.book === book);
     const latest = existing[0];
     if (!force && latest?.hash === hash) return { status: 'unchanged', record: latest };
-    if (!force && reason === 'auto' && latest && Date.now() - latest.createdAt < BACKUP_MIN_INTERVAL) {
-        return { status: 'wait', waitMs: BACKUP_MIN_INTERVAL - (Date.now() - latest.createdAt) };
-    }
-
     const record = {
         id: backupId(),
         schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -1131,30 +1217,57 @@ async function createLorebookBackup(book, { reason = 'manual', force = false, da
         translations,
     };
     await putLorebookBackup(record);
-    await pruneLorebookBackups(book);
+    await pruneLorebookBackups();
     renderBackupList();
     return { status: 'created', record };
 }
 
+function clearAutomaticBackupSchedule(book) {
+    const schedule = state.backupTimers.get(book);
+    if (!schedule) return;
+    if (schedule.idleTimer) clearTimeout(schedule.idleTimer);
+    if (schedule.continuousTimer) clearTimeout(schedule.continuousTimer);
+    state.backupTimers.delete(book);
+}
+
+function clearAllAutomaticBackupSchedules() {
+    for (const book of Array.from(state.backupTimers.keys())) clearAutomaticBackupSchedule(book);
+}
+
+async function runScheduledAutomaticBackup(book, expectedSchedule) {
+    if (state.backupTimers.get(book) !== expectedSchedule) return;
+    clearAutomaticBackupSchedule(book);
+    if (!getSettings().autoBackupEnabled || state.backupRestoreInProgress) return;
+    try {
+        await createLorebookBackup(book, { reason: 'auto' });
+    } catch (error) {
+        console.warn('[로어북 매니저] 자동 백업 실패', error);
+    }
+}
+
 function scheduleAutomaticLorebookBackup(book) {
     if (!book || !getSettings().autoBackupEnabled || state.backupRestoreInProgress) return;
-    const previous = state.backupTimers.get(book);
-    if (previous) clearTimeout(previous);
+    let schedule = state.backupTimers.get(book);
+    if (!schedule) {
+        schedule = {
+            dirtySince: Date.now(),
+            idleTimer: null,
+            continuousTimer: null,
+        };
+        state.backupTimers.set(book, schedule);
+        schedule.continuousTimer = setTimeout(
+            () => runScheduledAutomaticBackup(book, schedule),
+            BACKUP_CONTINUOUS_INTERVAL,
+        );
+    }
 
-    const run = async () => {
-        state.backupTimers.delete(book);
-        if (!getSettings().autoBackupEnabled || state.backupRestoreInProgress) return;
-        try {
-            const result = await createLorebookBackup(book, { reason: 'auto' });
-            if (result.status === 'wait') {
-                const timer = setTimeout(run, Math.max(1000, result.waitMs + 100));
-                state.backupTimers.set(book, timer);
-            }
-        } catch (error) {
-            console.warn('[로어북 매니저] 자동 백업 실패', error);
-        }
-    };
-    state.backupTimers.set(book, setTimeout(run, 1200));
+    // 수정이 이어지면 조용해지는 시점만 뒤로 미룬다. 30분 안전 타이머는
+    // 최초 수정 시점에 고정하여 장시간 편집 중에도 중간본을 남긴다.
+    if (schedule.idleTimer) clearTimeout(schedule.idleTimer);
+    schedule.idleTimer = setTimeout(
+        () => runScheduledAutomaticBackup(book, schedule),
+        BACKUP_IDLE_DELAY,
+    );
 }
 
 async function backupLorebookOnOpen(book) {
@@ -1283,7 +1396,6 @@ async function importLorebookBackupFile(file) {
     const candidates = Array.isArray(payload?.backups) ? payload.backups : [payload];
     if (!candidates.length || candidates.length > 500) throw new Error('백업 파일의 항목 수가 올바르지 않습니다.');
 
-    const books = new Set();
     let imported = 0;
     for (const source of candidates) {
         if (!source?.lorebook?.entries || typeof source.lorebook.entries !== 'object') continue;
@@ -1303,11 +1415,10 @@ async function importLorebookBackupFile(file) {
             translations,
         };
         await putLorebookBackup(record);
-        books.add(book);
         imported += 1;
     }
     if (!imported) throw new Error('파일에서 사용할 수 있는 로어북 백업을 찾지 못했습니다.');
-    for (const book of books) await pruneLorebookBackups(book);
+    await pruneLorebookBackups();
     await renderBackupList();
     return imported;
 }
@@ -1341,9 +1452,14 @@ async function renderBackupList() {
             group.open = openBooks.has(book);
             const summary = createElement('summary', 'slb-backup-group-summary');
             const title = createElement('strong', 'slb-backup-group-title', book);
-            const latest = new Date(bookRecords[0].createdAt).toLocaleString();
-            const groupMeta = createElement('small', 'slb-backup-group-meta', `${bookRecords.length}개 · 최신 ${latest}`);
-            summary.append(title, groupMeta);
+            const toggle = createElement('span', 'slb-backup-group-toggle');
+            toggle.title = '백업 목록 펼치기';
+            toggle.setAttribute('aria-hidden', 'true');
+            toggle.innerHTML = '<i class="fa-solid fa-chevron-down"></i>';
+            summary.append(title, toggle);
+            group.addEventListener('toggle', () => {
+                toggle.title = group.open ? '백업 목록 접기' : '백업 목록 펼치기';
+            });
             const groupBody = createElement('div', 'slb-backup-group-body');
 
             for (const record of bookRecords) {
@@ -1466,8 +1582,20 @@ function createAIBar() {
                                 <input type="file" id="slb-backup-import-file" accept="application/json,.json" hidden>
                             </div>
                         </div>
-                        <small class="slb-backup-note">API를 사용하지 않습니다. 로어북과 해당 번역본만 이 브라우저에 저장하며 로어북별 최근 20개를 보관합니다.</small>
+                        <small class="slb-backup-note">API를 사용하지 않습니다. 로어북을 열 때 기준본을 저장하고, 마지막 수정 3분 후 또는 계속 수정 중이면 30분마다 변경본을 저장합니다. 모든 로어북을 합쳐 최근 20개를 보관합니다.</small>
                         <div id="slb-backup-list" class="slb-backup-list"></div>
+                    </div>
+                </details>
+                <details class="slb-data-settings">
+                    <summary><span><i class="fa-solid fa-broom" aria-hidden="true"></i> 데이터 관리</span></summary>
+                    <div class="slb-data-body">
+                        <small>실제 로어북 원문은 건드리지 않고, 이 확장이 저장한 번역본·백업·설정만 정리합니다.</small>
+                        <div class="slb-data-actions">
+                            <button type="button" id="slb-clear-translations" class="menu_button"><i class="fa-solid fa-language"></i> 번역본 초기화</button>
+                            <button type="button" id="slb-clear-backups" class="menu_button"><i class="fa-solid fa-box-archive"></i> 백업 초기화</button>
+                            <button type="button" id="slb-reset-extension" class="menu_button slb-danger-button"><i class="fa-solid fa-trash-can"></i> 전체 데이터 초기화</button>
+                        </div>
+                        <small>Termux에서 폴더를 직접 지울 때는 코드가 실행되지 않으므로, 먼저 ‘전체 데이터 초기화’를 눌러주세요.</small>
                     </div>
                 </details>
             </div>
@@ -1553,7 +1681,11 @@ function createAIBar() {
     autoBackupEnabled.addEventListener('change', () => {
         settings.autoBackupEnabled = autoBackupEnabled.checked;
         saveSettingsDebounced();
-        if (autoBackupEnabled.checked && currentBookName()) backupLorebookOnOpen(currentBookName());
+        if (autoBackupEnabled.checked && currentBookName()) {
+            backupLorebookOnOpen(currentBookName());
+        } else {
+            clearAllAutomaticBackupSchedules();
+        }
         notify(autoBackupEnabled.checked ? '로어북 자동 백업을 켰습니다.' : '로어북 자동 백업을 껐습니다.');
     });
     document.getElementById('slb-backup-now').addEventListener('click', async event => {
@@ -1602,6 +1734,49 @@ function createAIBar() {
     });
     document.querySelector('.slb-backup-settings')?.addEventListener('toggle', event => {
         if (event.currentTarget.open) renderBackupList();
+    });
+    document.getElementById('slb-clear-translations')?.addEventListener('click', async event => {
+        if (!confirm('이 확장이 저장한 모든 로어북 번역본을 삭제할까요? 실제 로어북 원문과 백업은 유지됩니다.')) return;
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await clearTranslationStorage();
+            notify('저장된 번역본을 모두 초기화했습니다.', 'success');
+        } catch (error) {
+            notify(error.message || '번역본 초기화에 실패했습니다.', 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+    document.getElementById('slb-clear-backups')?.addEventListener('click', async event => {
+        if (!confirm('이 브라우저에 저장된 로어북 백업을 모두 삭제할까요? 번역본과 실제 로어북은 유지됩니다.')) return;
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            clearAllAutomaticBackupSchedules();
+            await clearAllLorebookBackups();
+            await renderBackupList();
+            notify('로어북 백업을 모두 초기화했습니다.', 'success');
+        } catch (error) {
+            notify(error.message || '백업 초기화에 실패했습니다.', 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+    document.getElementById('slb-reset-extension')?.addEventListener('click', async event => {
+        if (!confirm('로어북 매니저가 저장한 번역본, 백업, 연결 프로필 선택, 표시 설정과 캐시를 모두 삭제할까요? 실제 로어북 원문은 삭제되지 않습니다.')) return;
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await resetExtensionStorage({ refreshUI: true });
+            toastr.success('로어북 매니저 데이터를 모두 초기화했습니다. 화면을 새로고침합니다.', '로어북 매니저');
+            setTimeout(() => location.reload(), 450);
+        } catch (error) {
+            state.extensionDataCleaning = false;
+            state.backupRestoreInProgress = false;
+            button.disabled = false;
+            notify(error.message || '전체 데이터 초기화에 실패했습니다.', 'error');
+        }
     });
     document.getElementById('slb-test-profile').addEventListener('click', async event => {
         const button = event.currentTarget;
@@ -3905,7 +4080,20 @@ function scheduleEnhance() {
 }
 
 function bindEvents() {
-    document.getElementById('world_editor_select')?.addEventListener('change', () => {
+    const worldSelect = document.getElementById('world_editor_select');
+    const markWorldSelectionIntent = () => {
+        state.worldSelectUserIntentUntil = Date.now() + 4000;
+    };
+    worldSelect?.addEventListener('pointerdown', markWorldSelectionIntent, { passive: true });
+    worldSelect?.addEventListener('keydown', markWorldSelectionIntent);
+    document.addEventListener('pointerdown', event => {
+        const select2 = event.target?.closest?.('.select2-container');
+        if (select2?.querySelector?.('#select2-world_editor_select-container')
+            || select2?.previousElementSibling === worldSelect) {
+            markWorldSelectionIntent();
+        }
+    }, { capture: true, passive: true });
+    worldSelect?.addEventListener('change', event => {
         state.selectedUid = '';
         state.currentBook = '';
         state.currentBookData = null;
@@ -3918,7 +4106,20 @@ function bindEvents() {
         setTokenSummaryPending();
         scheduleEnhance();
         scheduleTokenSummary(null, 30);
-        backupLorebookOnOpen(currentBookName());
+        // SillyTavern은 초기화·목록 갱신 때도 change를 프로그램으로 발생시킨다.
+        // 실제 사용자 조작이 확인된 선택 변경만 열기 기준 백업으로 취급한다.
+        if (event.isTrusted || Date.now() <= state.worldSelectUserIntentUntil) {
+            state.worldSelectUserIntentUntil = 0;
+            backupLorebookOnOpen(currentBookName());
+        }
+    });
+    document.querySelector('#WI-SP-button > .drawer-toggle')?.addEventListener('click', () => {
+        setTimeout(() => {
+            const panel = document.getElementById('WorldInfo');
+            if (panel && !panel.classList.contains('closedDrawer')) {
+                backupLorebookOnOpen(currentBookName());
+            }
+        }, 0);
     });
     document.getElementById('world_refresh')?.addEventListener('click', () => {
         scheduleTokenSummary();
@@ -4008,7 +4209,6 @@ function init() {
     applyMobileDisplaySettings();
     scheduleEnhance();
     scheduleTokenSummary();
-    backupLorebookOnOpen(currentBookName());
     state.liveSyncTimer = setInterval(syncLiveEditorTokens, 1000);
     console.info(`[로어북 매니저] v${VERSION} initialized`);
 }

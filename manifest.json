@@ -6,7 +6,11 @@
   "js": "index.js",
   "css": "style.css",
   "author": "foreverharibo-boop",
-  "version": "1.4.1",
+  "version": "1.4.5",
   "homePage": "",
-  "auto_update": false
+  "auto_update": false,
+  "hooks": {
+    "clean": "cleanExtensionData",
+    "delete": "deleteExtensionData"
+  }
 }
