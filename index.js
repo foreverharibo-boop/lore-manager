@@ -11,7 +11,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.6';
+const VERSION = '1.4.7';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -108,7 +108,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-4-6';
+    const styleId = 'slb-critical-layout-1-4-7';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -1385,7 +1385,8 @@ async function exportLorebooksAsZip(requestedNames, onProgress = null) {
 
 function setBulkExportButtonBusy(button, busy) {
     if (!button) return;
-    button.disabled = busy;
+    if ('disabled' in button) button.disabled = busy;
+    button.setAttribute('aria-disabled', busy ? 'true' : 'false');
     button.dataset.slbBusy = busy ? 'true' : 'false';
     button.classList.toggle('slb-export-busy', busy);
 }
@@ -1535,22 +1536,32 @@ function createBulkLorebookExportControls() {
     if (!nativeExport?.parentElement) return;
     if (document.getElementById('slb-export-selected-lorebooks')) return;
 
-    const selectedButton = createElement('button', 'menu_button slb-bulk-export-button');
+    const selectedButton = createElement('div', 'menu_button fa-solid fa-list-check slb-bulk-export-button');
     selectedButton.id = 'slb-export-selected-lorebooks';
-    selectedButton.type = 'button';
+    selectedButton.tabIndex = 0;
+    selectedButton.setAttribute('role', 'button');
     selectedButton.title = '여러 로어북 선택 내보내기';
     selectedButton.setAttribute('aria-label', selectedButton.title);
-    selectedButton.innerHTML = '<i class="fa-solid fa-list-check" aria-hidden="true"></i>';
 
-    const allButton = createElement('button', 'menu_button slb-bulk-export-button');
+    const allButton = createElement('div', 'menu_button fa-solid fa-file-zipper slb-bulk-export-button');
     allButton.id = 'slb-export-all-lorebooks';
-    allButton.type = 'button';
+    allButton.tabIndex = 0;
+    allButton.setAttribute('role', 'button');
     allButton.title = '모든 로어북 내보내기';
     allButton.setAttribute('aria-label', allButton.title);
-    allButton.innerHTML = '<i class="fa-solid fa-file-zipper" aria-hidden="true"></i>';
 
     selectedButton.addEventListener('click', showLorebookExportSelection);
     allButton.addEventListener('click', () => exportAllLorebooks(allButton));
+    selectedButton.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        showLorebookExportSelection();
+    });
+    allButton.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        exportAllLorebooks(allButton);
+    });
     nativeExport.after(selectedButton, allButton);
 }
 

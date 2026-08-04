@@ -375,17 +375,11 @@
     flex: 0 0 auto;
 }
 
-#WorldInfo.slb-active .slb-bulk-export-button {
-    box-sizing: border-box;
-    min-width: 28px;
-    min-height: 28px;
-    padding: 4px 6px;
-}
-
 #WorldInfo.slb-active .slb-bulk-export-button.slb-export-busy,
 .slb-export-modal .slb-export-busy {
     cursor: wait;
     opacity: 0.58;
+    pointer-events: none;
 }
 
 .slb-export-modal-overlay {
@@ -427,13 +421,39 @@
     justify-content: space-between;
 }
 
+.slb-export-modal-controls {
+    display: grid;
+    grid-template-columns: max-content max-content;
+    justify-content: start;
+    align-items: center;
+}
+
+.slb-export-modal-controls .menu_button {
+    display: inline-flex !important;
+    box-sizing: border-box !important;
+    width: max-content !important;
+    min-width: max-content !important;
+    max-width: none !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding-inline: 9px !important;
+    line-height: 1.2 !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+}
+
 .slb-export-modal-close {
     flex: 0 0 auto;
     min-width: 30px;
 }
 
 .slb-export-selected-count {
-    margin-left: auto;
+    grid-column: 1 / -1;
+    justify-self: start;
+    margin-left: 0;
     opacity: 0.75;
     white-space: nowrap;
 }
@@ -491,15 +511,6 @@
         width: 100%;
         max-height: calc(100dvh - 16px);
         padding: 10px;
-    }
-
-    .slb-export-modal-controls {
-        flex-wrap: wrap;
-    }
-
-    .slb-export-selected-count {
-        flex: 1 1 100%;
-        margin-left: 0;
     }
 
     .slb-export-modal-footer .menu_button {
