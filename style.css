@@ -370,8 +370,142 @@
 }
 
 #WorldInfo.slb-active #world_import_button,
-#WorldInfo.slb-active #world_popup_export {
+#WorldInfo.slb-active #world_popup_export,
+#WorldInfo.slb-active .slb-bulk-export-button {
     flex: 0 0 auto;
+}
+
+#WorldInfo.slb-active .slb-bulk-export-button {
+    box-sizing: border-box;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 4px 6px;
+}
+
+#WorldInfo.slb-active .slb-bulk-export-button.slb-export-busy,
+.slb-export-modal .slb-export-busy {
+    cursor: wait;
+    opacity: 0.58;
+}
+
+.slb-export-modal-overlay {
+    position: fixed;
+    z-index: 100000;
+    inset: 0;
+    display: grid;
+    box-sizing: border-box;
+    place-items: center;
+    padding: 18px;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.slb-export-modal {
+    display: grid;
+    box-sizing: border-box;
+    width: min(620px, 100%);
+    max-height: min(760px, calc(100dvh - 36px));
+    grid-template-rows: auto auto minmax(120px, 1fr) auto auto;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(127, 127, 127, 0.5));
+    border-radius: 10px;
+    background: var(--SmartThemeBlurTintColor, #f8f6ef);
+    color: var(--SmartThemeBodyColor, inherit);
+    box-shadow: 0 14px 42px rgba(0, 0, 0, 0.38);
+}
+
+.slb-export-modal-header,
+.slb-export-modal-controls,
+.slb-export-modal-footer {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 7px;
+}
+
+.slb-export-modal-header {
+    justify-content: space-between;
+}
+
+.slb-export-modal-close {
+    flex: 0 0 auto;
+    min-width: 30px;
+}
+
+.slb-export-selected-count {
+    margin-left: auto;
+    opacity: 0.75;
+    white-space: nowrap;
+}
+
+.slb-export-book-list {
+    display: grid;
+    min-height: 0;
+    overflow: auto;
+    align-content: start;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(127, 127, 127, 0.4));
+    border-radius: 7px;
+}
+
+.slb-export-book-option {
+    display: grid;
+    box-sizing: border-box;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 5px 7px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.slb-export-book-option:hover,
+.slb-export-book-option:focus-within {
+    background: rgba(127, 127, 127, 0.12);
+}
+
+.slb-export-book-option > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.slb-export-modal-status {
+    min-height: 1.2em;
+    opacity: 0.78;
+}
+
+.slb-export-modal-footer {
+    justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+    .slb-export-modal-overlay {
+        padding: 8px;
+    }
+
+    .slb-export-modal {
+        width: 100%;
+        max-height: calc(100dvh - 16px);
+        padding: 10px;
+    }
+
+    .slb-export-modal-controls {
+        flex-wrap: wrap;
+    }
+
+    .slb-export-selected-count {
+        flex: 1 1 100%;
+        margin-left: 0;
+    }
+
+    .slb-export-modal-footer .menu_button {
+        flex: 1 1 0;
+        min-width: 0;
+    }
 }
 
 #WorldInfo.slb-active .slb-token-strip {

@@ -6,12 +6,12 @@ import {
 } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
-import { loadWorldInfo, splitKeywordsAndRegexes, saveWorldInfo, setWIOriginalDataValue, updateWorldInfoList, worldInfoFilter } from '../../../world-info.js';
+import { loadWorldInfo, splitKeywordsAndRegexes, saveWorldInfo, setWIOriginalDataValue, updateWorldInfoList, worldInfoFilter, world_names } from '../../../world-info.js';
 import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.5';
+const VERSION = '1.4.6';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -108,7 +108,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-4-5';
+    const styleId = 'slb-critical-layout-1-4-6';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -1296,6 +1296,10 @@ function safeBackupFilename(value) {
 
 function downloadJsonFile(filename, value) {
     const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json;charset=utf-8' });
+    downloadBlobFile(filename, blob);
+}
+
+function downloadBlobFile(filename, blob) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -1304,6 +1308,250 @@ function downloadJsonFile(filename, value) {
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function availableLorebookNames() {
+    const nativeNames = Array.isArray(world_names) ? world_names : [];
+    const selectNames = Array.from(document.querySelectorAll('#world_editor_select option'))
+        .filter(option => option.value !== '')
+        .map(option => option.textContent?.trim())
+        .filter(Boolean);
+    return Array.from(new Set([...nativeNames, ...selectNames]
+        .map(name => String(name ?? '').trim())
+        .filter(Boolean)));
+}
+
+async function getJSZipConstructor() {
+    if (typeof globalThis.JSZip === 'function') return globalThis.JSZip;
+    await import('/lib/jszip.min.js');
+    if (typeof globalThis.JSZip !== 'function') {
+        throw new Error('ZIP 생성 기능을 불러오지 못했습니다. SillyTavern을 새로고침한 뒤 다시 시도해주세요.');
+    }
+    return globalThis.JSZip;
+}
+
+function uniqueLorebookArchiveName(book, usedNames) {
+    const base = safeBackupFilename(book) || 'lorebook';
+    let candidate = `${base}.json`;
+    for (let suffix = 2; usedNames.has(candidate.toLocaleLowerCase()) && suffix < 10000; suffix += 1) {
+        candidate = `${base} (${suffix}).json`;
+    }
+    usedNames.add(candidate.toLocaleLowerCase());
+    return candidate;
+}
+
+async function exportLorebooksAsZip(requestedNames, onProgress = null) {
+    const available = new Set(availableLorebookNames());
+    const names = Array.from(new Set(requestedNames
+        .map(name => String(name ?? '').trim())
+        .filter(name => name && available.has(name))));
+    if (!names.length) throw new Error('내보낼 로어북을 선택해주세요.');
+
+    const JSZip = await getJSZipConstructor();
+    const archive = new JSZip();
+    const usedNames = new Set();
+    const failures = [];
+    let completed = 0;
+    let exported = 0;
+
+    await mapLimit(names, 3, async book => {
+        try {
+            const data = await loadWorldInfo(book);
+            if (!data?.entries) throw new Error('로어북 데이터를 불러오지 못했습니다.');
+            const filename = uniqueLorebookArchiveName(book, usedNames);
+            archive.file(filename, JSON.stringify(data, null, 2));
+            exported += 1;
+        } catch (error) {
+            failures.push({ book, message: error?.message || '불러오기 실패' });
+        } finally {
+            completed += 1;
+            onProgress?.(completed, names.length, book);
+        }
+    });
+
+    if (!exported) {
+        throw new Error(failures[0]?.message || '로어북을 내보내지 못했습니다.');
+    }
+
+    const blob = await archive.generateAsync({
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 },
+    });
+    const date = new Date().toISOString().slice(0, 10);
+    downloadBlobFile(`lorebooks-${date}.zip`, blob);
+    return { exported, failures };
+}
+
+function setBulkExportButtonBusy(button, busy) {
+    if (!button) return;
+    button.disabled = busy;
+    button.dataset.slbBusy = busy ? 'true' : 'false';
+    button.classList.toggle('slb-export-busy', busy);
+}
+
+function reportBulkExportResult(result) {
+    if (result.failures.length) {
+        const failedNames = result.failures.map(item => item.book).join(', ');
+        toastr.warning(`${result.exported}개는 내보냈지만 ${result.failures.length}개는 실패했습니다: ${failedNames}`, '로어북 내보내기');
+        return;
+    }
+    toastr.success(`${result.exported}개 로어북을 ZIP으로 내보냈습니다.`, '로어북 내보내기');
+}
+
+async function exportAllLorebooks(button) {
+    if (button?.dataset.slbBusy === 'true') return;
+    const names = availableLorebookNames();
+    if (!names.length) {
+        toastr.warning('내보낼 로어북이 없습니다.', '로어북 내보내기');
+        return;
+    }
+    setBulkExportButtonBusy(button, true);
+    toastr.info(`${names.length}개 로어북을 준비하고 있습니다.`, '전체 로어북 내보내기');
+    try {
+        const result = await exportLorebooksAsZip(names);
+        reportBulkExportResult(result);
+    } catch (error) {
+        toastr.error(error.message || '전체 로어북 내보내기에 실패했습니다.', '로어북 내보내기');
+    } finally {
+        setBulkExportButtonBusy(button, false);
+    }
+}
+
+function showLorebookExportSelection() {
+    document.getElementById('slb-lorebook-export-modal')?.remove();
+    const names = availableLorebookNames();
+    if (!names.length) {
+        toastr.warning('선택할 로어북이 없습니다.', '로어북 내보내기');
+        return;
+    }
+
+    const overlay = createElement('div', 'slb-export-modal-overlay');
+    overlay.id = 'slb-lorebook-export-modal';
+    const dialog = createElement('div', 'slb-export-modal');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'slb-export-modal-title');
+
+    const header = createElement('div', 'slb-export-modal-header');
+    const title = createElement('strong', '', '로어북 선택 내보내기');
+    title.id = 'slb-export-modal-title';
+    const closeButton = createElement('button', 'menu_button slb-export-modal-close');
+    closeButton.type = 'button';
+    closeButton.title = '닫기';
+    closeButton.setAttribute('aria-label', '닫기');
+    closeButton.innerHTML = '<i class="fa-solid fa-xmark" aria-hidden="true"></i>';
+    header.append(title, closeButton);
+
+    const controls = createElement('div', 'slb-export-modal-controls');
+    const selectAllButton = createElement('button', 'menu_button', '전체 선택');
+    const clearButton = createElement('button', 'menu_button', '전체 해제');
+    selectAllButton.type = 'button';
+    clearButton.type = 'button';
+    const count = createElement('small', 'slb-export-selected-count');
+    controls.append(selectAllButton, clearButton, count);
+
+    const list = createElement('div', 'slb-export-book-list');
+    for (const name of names) {
+        const label = createElement('label', 'slb-export-book-option');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = name;
+        const labelText = createElement('span', '', name);
+        label.append(checkbox, labelText);
+        list.append(label);
+    }
+
+    const status = createElement('small', 'slb-export-modal-status', '내보낼 로어북을 선택해주세요.');
+    const footer = createElement('div', 'slb-export-modal-footer');
+    const cancelButton = createElement('button', 'menu_button', '취소');
+    const exportButton = createElement('button', 'menu_button', '선택한 로어북 내보내기');
+    cancelButton.type = 'button';
+    exportButton.type = 'button';
+    footer.append(cancelButton, exportButton);
+    dialog.append(header, controls, list, status, footer);
+    overlay.append(dialog);
+    document.body.append(overlay);
+
+    const checkboxes = () => Array.from(list.querySelectorAll('input[type="checkbox"]'));
+    const updateCount = () => {
+        const selected = checkboxes().filter(input => input.checked).length;
+        count.textContent = `${selected} / ${names.length}개 선택`;
+        exportButton.disabled = selected === 0;
+    };
+    const close = () => {
+        document.removeEventListener('keydown', onKeyDown);
+        overlay.remove();
+    };
+    const onKeyDown = event => {
+        if (event.key === 'Escape') close();
+    };
+
+    list.addEventListener('change', updateCount);
+    selectAllButton.addEventListener('click', () => {
+        checkboxes().forEach(input => { input.checked = true; });
+        updateCount();
+    });
+    clearButton.addEventListener('click', () => {
+        checkboxes().forEach(input => { input.checked = false; });
+        updateCount();
+    });
+    closeButton.addEventListener('click', close);
+    cancelButton.addEventListener('click', close);
+    overlay.addEventListener('click', event => {
+        if (event.target === overlay) close();
+    });
+    exportButton.addEventListener('click', async () => {
+        const selected = checkboxes().filter(input => input.checked).map(input => input.value);
+        if (!selected.length) return;
+        setBulkExportButtonBusy(exportButton, true);
+        closeButton.disabled = true;
+        cancelButton.disabled = true;
+        selectAllButton.disabled = true;
+        clearButton.disabled = true;
+        try {
+            const result = await exportLorebooksAsZip(selected, (done, total) => {
+                status.textContent = `로어북 준비 중 · ${done} / ${total}`;
+            });
+            reportBulkExportResult(result);
+            close();
+        } catch (error) {
+            status.textContent = error.message || '선택한 로어북 내보내기에 실패했습니다.';
+            toastr.error(status.textContent, '로어북 내보내기');
+            setBulkExportButtonBusy(exportButton, false);
+            closeButton.disabled = false;
+            cancelButton.disabled = false;
+            selectAllButton.disabled = false;
+            clearButton.disabled = false;
+        }
+    });
+    document.addEventListener('keydown', onKeyDown);
+    updateCount();
+    requestAnimationFrame(() => list.querySelector('input')?.focus());
+}
+
+function createBulkLorebookExportControls() {
+    const nativeExport = document.getElementById('world_popup_export');
+    if (!nativeExport?.parentElement) return;
+    if (document.getElementById('slb-export-selected-lorebooks')) return;
+
+    const selectedButton = createElement('button', 'menu_button slb-bulk-export-button');
+    selectedButton.id = 'slb-export-selected-lorebooks';
+    selectedButton.type = 'button';
+    selectedButton.title = '여러 로어북 선택 내보내기';
+    selectedButton.setAttribute('aria-label', selectedButton.title);
+    selectedButton.innerHTML = '<i class="fa-solid fa-list-check" aria-hidden="true"></i>';
+
+    const allButton = createElement('button', 'menu_button slb-bulk-export-button');
+    allButton.id = 'slb-export-all-lorebooks';
+    allButton.type = 'button';
+    allButton.title = '모든 로어북 내보내기';
+    allButton.setAttribute('aria-label', allButton.title);
+    allButton.innerHTML = '<i class="fa-solid fa-file-zipper" aria-hidden="true"></i>';
+
+    selectedButton.addEventListener('click', showLorebookExportSelection);
+    allButton.addEventListener('click', () => exportAllLorebooks(allButton));
+    nativeExport.after(selectedButton, allButton);
 }
 
 function backupExportEnvelope(backups) {
@@ -4050,6 +4298,7 @@ function enhanceAll() {
     if (state.sorting) return;
     ensureCriticalLayoutStyles();
     createAIBar();
+    createBulkLorebookExportControls();
     createWorkspace();
     hideNativeHeaderRows();
     const entries = renderedEntries();
@@ -4175,6 +4424,7 @@ function init() {
     worldInfo.classList.add('slb-active');
     ensureCriticalLayoutStyles();
     createAIBar();
+    createBulkLorebookExportControls();
     createWorkspace();
     bindEvents();
     state.responsiveMedia = window.matchMedia('(max-width: 760px)');
