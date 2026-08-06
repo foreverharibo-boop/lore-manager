@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.8';
+const VERSION = '1.4.11';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -251,6 +251,7 @@ function notify(message, type = 'info') {
 
     if (type === 'error') toastr.error(message, '로어북 매니저');
     if (type === 'success') toastr.success(message, '로어북 매니저', { timeOut: 2200 });
+    if (type === 'warning') toastr.warning(message, '로어북 매니저', { timeOut: 5000 });
 }
 
 function currentBookName() {
@@ -380,10 +381,159 @@ async function requestWithProfile(prompt, maxTokens = null) {
 function protectedTextRules() {
     return [
         'Preserve every template token and macro exactly, including {{user}}, {{char}}, {{...}}, <tags>, regexes, and code-like identifiers.',
+        'Preserve all standalone structural headings and their surrounding symbols exactly, including Markdown headings and lines wrapped in **, __, ##, [], {}, (), <>, or other paired punctuation.',
         'Preserve line breaks, list structure, names, dates, numbers, and factual meaning.',
         'Do not add commentary, analysis, quotation marks, or Markdown fences.',
         'Return only the requested final text.',
     ].join('\n');
+}
+
+const STRUCTURE_WRAPPER_PAIRS = Object.freeze([
+    ['[[', ']]'],
+    ['{{', '}}'],
+    ['**', '**'],
+    ['__', '__'],
+    ['~~', '~~'],
+    ['==', '=='],
+    ['##', '##'],
+    ['@@', '@@'],
+    ['%%', '%%'],
+    ['||', '||'],
+    ['//', '//'],
+    ['::', '::'],
+    ['++', '++'],
+    ['--', '--'],
+    ['``', '``'],
+    ['<<', '>>'],
+    ['【', '】'],
+    ['〔', '〕'],
+    ['〖', '〗'],
+    ['〘', '〙'],
+    ['〚', '〛'],
+    ['「', '」'],
+    ['『', '』'],
+    ['〈', '〉'],
+    ['《', '》'],
+    ['（', '）'],
+    ['［', '］'],
+    ['｛', '｝'],
+    ['＜', '＞'],
+    ['«', '»'],
+    ['‹', '›'],
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+    ['<', '>'],
+    ['`', '`'],
+    ['*', '*'],
+    ['_', '_'],
+    ['#', '#'],
+    ['~', '~'],
+    ['=', '='],
+    ['|', '|'],
+]);
+
+const MIRRORED_STRUCTURE_SYMBOLS = Object.freeze(new Map([
+    ['(', ')'], [')', '('], ['[', ']'], [']', '['], ['{', '}'], ['}', '{'],
+    ['<', '>'], ['>', '<'], ['【', '】'], ['】', '【'], ['〔', '〕'], ['〕', '〔'],
+    ['〖', '〗'], ['〗', '〖'], ['〘', '〙'], ['〙', '〘'], ['〚', '〛'], ['〛', '〚'],
+    ['「', '」'], ['」', '「'], ['『', '』'], ['』', '『'], ['〈', '〉'], ['〉', '〈'],
+    ['《', '》'], ['》', '《'], ['（', '）'], ['）', '（'], ['［', '］'], ['］', '［'],
+    ['｛', '｝'], ['｝', '｛'], ['＜', '＞'], ['＞', '＜'], ['«', '»'], ['»', '«'],
+    ['‹', '›'], ['›', '‹'],
+]));
+
+function mirroredStructureClose(opening) {
+    return Array.from(opening)
+        .reverse()
+        .map(character => MIRRORED_STRUCTURE_SYMBOLS.get(character) || character)
+        .join('');
+}
+
+function getStructureLineDescriptor(line) {
+    const text = String(line ?? '').trim();
+    if (!text) return null;
+
+    const fence = text.match(/^(`{3,}|~{3,})/);
+    if (fence) return { key: `fence:${fence[1][0]}`, exact: false };
+
+    if (/^<!--[\s\S]*-->$/.test(text)) return { key: 'html-comment', exact: false };
+    if (/^<\/?[A-Za-z][^>]*>$/.test(text)) return { key: `tag:${text}`, exact: true };
+
+    const divider = text.match(/^([\-_=*#~])\1{2,}$/);
+    if (divider) return { key: `divider:${divider[1]}`, exact: false };
+
+    for (const [opening, closing] of STRUCTURE_WRAPPER_PAIRS) {
+        if (
+            text.length > opening.length + closing.length
+            && text.startsWith(opening)
+            && text.endsWith(closing)
+            && text.slice(opening.length, text.length - closing.length).trim()
+        ) {
+            return { key: `wrapper:${opening}:${closing}`, exact: false };
+        }
+    }
+
+    const markdownHeading = text.match(/^(#{1,6})(?:\s+)(\S[\s\S]*?)(?:\s+\1)?$/);
+    if (markdownHeading) {
+        const hasClosing = new RegExp(`\\s${markdownHeading[1]}$`).test(text);
+        return { key: `markdown-heading:${markdownHeading[1].length}:${hasClosing ? 'closed' : 'open'}`, exact: false };
+    }
+
+    const blockquoteHeading = text.match(/^(>+)\s*(.+)$/);
+    if (blockquoteHeading) {
+        const nested = getStructureLineDescriptor(blockquoteHeading[2]);
+        if (nested) return { key: `blockquote:${blockquoteHeading[1].length}:${nested.key}`, exact: nested.exact };
+    }
+
+    const symbolicWrapper = text.match(/^([\p{P}\p{S}]+)\s*(\S(?:[\s\S]*?\S)?)\s*([\p{P}\p{S}]+)$/u);
+    if (symbolicWrapper) {
+        const opening = symbolicWrapper[1];
+        const closing = symbolicWrapper[3];
+        const quotedSentence = /^["'“”‘’]+$/.test(opening) || /^["'“”‘’]+$/.test(closing);
+        if (
+            !quotedSentence
+            && symbolicWrapper[2].length <= 200
+            && (closing === opening || closing === mirroredStructureClose(opening))
+        ) {
+            return { key: `symbol-wrapper:${opening}:${closing}`, exact: false };
+        }
+    }
+
+    return null;
+}
+
+function getDocumentStructureSignature(value) {
+    return splitReflectionDocument(value).segments
+        .map(getStructureLineDescriptor)
+        .filter(Boolean)
+        .map(descriptor => descriptor.key);
+}
+
+function getImmutableStructureTokens(value) {
+    const text = String(value ?? '');
+    return [
+        ...(text.match(/{{[^{}\r\n]*}}/g) || []),
+        ...(text.match(/<\/?[A-Za-z][^>\r\n]*>/g) || []),
+    ];
+}
+
+function assertProtectedStructurePreserved(before, after) {
+    const beforeSignature = getDocumentStructureSignature(before);
+    const afterSignature = getDocumentStructureSignature(after);
+    const sameStructure = beforeSignature.length === afterSignature.length
+        && beforeSignature.every((key, index) => key === afterSignature[index]);
+    if (!sameStructure) {
+        throw new Error('AI 수정 결과에서 제목·괄호·태그 같은 구조가 바뀌어 적용하지 않았습니다.');
+    }
+
+    const beforeTokens = getImmutableStructureTokens(before);
+    const afterTokens = getImmutableStructureTokens(after);
+    const sameTokens = beforeTokens.length === afterTokens.length
+        && beforeTokens.every((token, index) => token === afterTokens[index]);
+    if (!sameTokens) {
+        throw new Error('AI 수정 결과에서 매크로 또는 태그가 바뀌어 적용하지 않았습니다.');
+    }
 }
 
 function canTranslate() {
@@ -567,11 +717,29 @@ async function runQueuedGoogleTranslation(text, lang, onProgress) {
 
 function googleTranslate(text, onProgress = null) {
     const lang = GOOGLE_LANGUAGE_CODES[getSettings().language] || 'ko';
+    return googleTranslateToLanguage(text, lang, onProgress);
+}
+
+function googleTranslateToLanguage(text, lang, onProgress = null) {
     const job = state.googleTranslationQueue
         .catch(() => undefined)
         .then(() => runQueuedGoogleTranslation(String(text ?? ''), lang, onProgress));
     state.googleTranslationQueue = job.catch(() => undefined);
     return job;
+}
+
+function detectOriginalLanguageCode(source) {
+    const text = String(source ?? '');
+    const counts = {
+        ko: (text.match(/[\uac00-\ud7af]/g) || []).length,
+        ja: (text.match(/[\u3040-\u30ff]/g) || []).length,
+        zh: (text.match(/[\u3400-\u9fff]/g) || []).length,
+        en: (text.match(/[A-Za-z]/g) || []).length,
+    };
+    if (counts.ja > 0 && counts.ja + counts.zh >= Math.max(counts.ko, counts.en)) return 'ja';
+    if (counts.ko > Math.max(counts.ja + counts.zh, counts.en)) return 'ko';
+    if (counts.zh > Math.max(counts.ko, counts.en)) return 'zh-CN';
+    return 'en';
 }
 
 async function translateText(source, onProgress = null) {
@@ -715,11 +883,24 @@ async function reflectTranslationSegmentInSource({
     editedTranslationSegments,
     contextBefore,
     contextAfter,
+    originalLanguageCode,
 }) {
     const language = getSettings().language;
     const expectedSegments = editedTranslationSegments.length;
     if (!expectedSegments) return [];
     if (editedTranslationSegments.every(segment => !segment.trim())) return [...editedTranslationSegments];
+
+    if (getSettings().translationProvider === 'google') {
+        const revised = await googleTranslateToLanguage(
+            editedTranslationSegments.join('\n'),
+            originalLanguageCode,
+        );
+        const revisedSegments = splitReflectionDocument(revised).segments;
+        if (revisedSegments.length !== expectedSegments) {
+            throw new Error(`구글 번역이 수정 구간을 ${expectedSegments}줄 형식으로 반환하지 않았습니다.`);
+        }
+        return revisedSegments;
+    }
 
     const prompt = [
         `The user edited ${language} translation lines from a lorebook entry.`,
@@ -753,6 +934,31 @@ async function reflectTranslationSegmentInSource({
     return revisedSegments;
 }
 
+function sameReflectionSegments(left, right) {
+    return left.length === right.length && left.every((segment, index) => segment === right[index]);
+}
+
+function assertOnlyMappedSourceSegmentsChanged(sourceSegments, revisedSegments, replacements) {
+    let sourceCursor = 0;
+    let revisedCursor = 0;
+
+    for (const replacement of replacements) {
+        const untouched = sourceSegments.slice(sourceCursor, replacement.oldStart);
+        const candidateUntouched = revisedSegments.slice(revisedCursor, revisedCursor + untouched.length);
+        if (!sameReflectionSegments(untouched, candidateUntouched)) {
+            throw new Error('수정 대상 밖의 원문이 달라져 반영을 중단했습니다. 원문은 변경하지 않았습니다.');
+        }
+        sourceCursor = replacement.oldEnd;
+        revisedCursor += untouched.length + replacement.revisedSegments.length;
+    }
+
+    const untouchedTail = sourceSegments.slice(sourceCursor);
+    const candidateTail = revisedSegments.slice(revisedCursor);
+    if (!sameReflectionSegments(untouchedTail, candidateTail)) {
+        throw new Error('수정 대상 밖의 원문이 달라져 반영을 중단했습니다. 원문은 변경하지 않았습니다.');
+    }
+}
+
 async function reflectTranslationChangesInSource(source, previousTranslation, editedTranslation) {
     const sourceDocument = splitReflectionDocument(source);
     const previousDocument = splitReflectionDocument(previousTranslation);
@@ -764,52 +970,172 @@ async function reflectTranslationChangesInSource(source, previousTranslation, ed
     const hunks = buildReflectionChangeHunks(previousDocument.segments, editedDocument.segments);
     if (!hunks.length) return { source, changedRegions: 0 };
 
-    const replacements = [];
     for (const hunk of hunks) {
         const sourceSegments = sourceDocument.segments.slice(hunk.oldStart, hunk.oldEnd);
         const previousTranslationSegments = previousDocument.segments.slice(hunk.oldStart, hunk.oldEnd);
         const editedTranslationSegments = editedDocument.segments.slice(hunk.newStart, hunk.newEnd);
-        const revisedSegments = editedTranslationSegments.length
-            ? await reflectTranslationSegmentInSource({
-                sourceSegments,
-                previousTranslationSegments,
-                editedTranslationSegments,
-                contextBefore: sourceDocument.segments[hunk.oldStart - 1] ?? '',
-                contextAfter: sourceDocument.segments[hunk.oldEnd] ?? '',
-            })
-            : [];
-        replacements.push({ ...hunk, revisedSegments });
+        if (
+            !editedTranslationSegments.length
+            && [...sourceSegments, ...previousTranslationSegments].some(getStructureLineDescriptor)
+        ) {
+            throw new Error('제목·괄호·태그 같은 구조 줄이 삭제되어 원문 반영을 중단했습니다.');
+        }
     }
 
-    const revisedSourceSegments = [...sourceDocument.segments];
-    for (const replacement of replacements.reverse()) {
-        revisedSourceSegments.splice(
-            replacement.oldStart,
-            replacement.oldEnd - replacement.oldStart,
-            ...replacement.revisedSegments,
-        );
+    const originalLanguageCode = detectOriginalLanguageCode(source);
+    let firstFailureReason = '';
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+            const replacements = [];
+            for (const hunk of hunks) {
+                const sourceSegments = sourceDocument.segments.slice(hunk.oldStart, hunk.oldEnd);
+                const previousTranslationSegments = previousDocument.segments.slice(hunk.oldStart, hunk.oldEnd);
+                const editedTranslationSegments = editedDocument.segments.slice(hunk.newStart, hunk.newEnd);
+                const revisedSegments = editedTranslationSegments.length
+                    ? await reflectTranslationSegmentInSource({
+                        sourceSegments,
+                        previousTranslationSegments,
+                        editedTranslationSegments,
+                        contextBefore: sourceDocument.segments[hunk.oldStart - 1] ?? '',
+                        contextAfter: sourceDocument.segments[hunk.oldEnd] ?? '',
+                        originalLanguageCode,
+                    })
+                    : [];
+                replacements.push({ ...hunk, revisedSegments });
+            }
+
+            const revisedSourceSegments = [...sourceDocument.segments];
+            for (const replacement of [...replacements].reverse()) {
+                revisedSourceSegments.splice(
+                    replacement.oldStart,
+                    replacement.oldEnd - replacement.oldStart,
+                    ...replacement.revisedSegments,
+                );
+            }
+            if (revisedSourceSegments.length !== editedDocument.segments.length) {
+                throw new Error('부분 반영 결과의 줄 구성이 맞지 않습니다.');
+            }
+            assertOnlyMappedSourceSegmentsChanged(sourceDocument.segments, revisedSourceSegments, replacements);
+            const revisedSource = joinReflectionDocument(revisedSourceSegments, editedDocument.separators);
+            assertProtectedStructurePreserved(source, revisedSource);
+            return {
+                source: revisedSource,
+                changedRegions: hunks.length,
+                retried: attempt > 0,
+                firstFailureReason,
+                provider: getSettings().translationProvider,
+                originalLanguageCode,
+            };
+        } catch (error) {
+            const reason = error?.message || '알 수 없는 검증 오류';
+            if (attempt === 0) {
+                firstFailureReason = reason;
+                continue;
+            }
+            throw new Error(`자동 재생성 1회 후에도 반영에 실패했습니다. 첫 실패: ${firstFailureReason} / 재시도 실패: ${reason}`);
+        }
     }
-    if (revisedSourceSegments.length !== editedDocument.segments.length) {
-        throw new Error('부분 반영 결과의 줄 구성이 맞지 않아 원문은 변경하지 않았습니다.');
+    throw new Error('원문 부분 반영에 실패했습니다.');
+}
+
+function getCursorParagraphRange(value, cursorPosition) {
+    const text = String(value ?? '');
+    const document = splitReflectionDocument(text);
+    const lines = [];
+    let offset = 0;
+
+    for (let index = 0; index < document.segments.length; index += 1) {
+        const segment = document.segments[index];
+        const separator = document.separators[index] ?? '';
+        lines.push({
+            text: segment,
+            start: offset,
+            end: offset + segment.length,
+        });
+        offset += segment.length + separator.length;
     }
+
+    if (!lines.length) return { start: 0, end: 0, text: '' };
+
+    const cursor = Math.max(0, Math.min(text.length, Number(cursorPosition) || 0));
+    let lineIndex = lines.findIndex((line, index) => (
+        cursor >= line.start
+        && (cursor <= line.end || index === lines.length - 1)
+    ));
+    if (lineIndex < 0) lineIndex = lines.length - 1;
+
+    if (!lines[lineIndex].text.trim()) {
+        const next = lines.findIndex((line, index) => index > lineIndex && line.text.trim());
+        if (next >= 0) {
+            lineIndex = next;
+        } else {
+            for (let index = lineIndex - 1; index >= 0; index -= 1) {
+                if (lines[index].text.trim()) {
+                    lineIndex = index;
+                    break;
+                }
+            }
+        }
+    }
+
+    let first = lineIndex;
+    let last = lineIndex;
+    while (
+        first > 0
+        && lines[first - 1].text.trim()
+        && !getStructureLineDescriptor(lines[first - 1].text)
+    ) first -= 1;
+    while (
+        last < lines.length - 1
+        && lines[last + 1].text.trim()
+        && !getStructureLineDescriptor(lines[last + 1].text)
+    ) last += 1;
+
+    // 구조 제목은 주변 본문과 빈 줄 없이 붙어 있어도 제목 한 줄만 수정한다.
+    if (getStructureLineDescriptor(lines[lineIndex].text)) {
+        first = lineIndex;
+        last = lineIndex;
+    }
+
     return {
-        source: joinReflectionDocument(revisedSourceSegments, editedDocument.separators),
-        changedRegions: hunks.length,
+        start: lines[first].start,
+        end: lines[last].end,
+        text: text.slice(lines[first].start, lines[last].end),
     };
 }
 
-async function reviseText(text, instruction, kind) {
+async function reviseTextAtCursor(text, cursorPosition, instruction, kind) {
+    const range = getCursorParagraphRange(text, cursorPosition);
+    if (!range.text.trim()) throw new Error('커서 주변에서 수정할 문단을 찾지 못했습니다.');
+
+    const contextBefore = text.slice(Math.max(0, range.start - 1200), range.start);
+    const contextAfter = text.slice(range.end, Math.min(text.length, range.end + 1200));
     const prompt = [
-        `Revise the following lorebook ${kind} according to the user's instruction.`,
+        `Revise ONLY the target lorebook ${kind} paragraph according to the user's instruction.`,
+        'The neighboring context is read-only. Never return, rewrite, summarize, or duplicate it.',
+        'Return only the replacement text for the target paragraph.',
         protectedTextRules(),
         '',
         '=== USER INSTRUCTION ===',
         instruction,
         '',
-        `=== CURRENT ${kind.toUpperCase()} ===`,
-        text,
+        '=== READ-ONLY CONTEXT BEFORE ===',
+        contextBefore || '(none)',
+        '',
+        `=== TARGET ${kind.toUpperCase()} PARAGRAPH ===`,
+        range.text,
+        '',
+        '=== READ-ONLY CONTEXT AFTER ===',
+        contextAfter || '(none)',
     ].join('\n');
-    return requestWithProfile(prompt);
+    const revisedParagraph = await requestWithProfile(prompt);
+    const revisedText = text.slice(0, range.start) + revisedParagraph + text.slice(range.end);
+    assertProtectedStructurePreserved(text, revisedText);
+    return {
+        text: revisedText,
+        start: range.start,
+        end: range.start + revisedParagraph.length,
+    };
 }
 
 function normalizeKeywords(items) {
@@ -1811,7 +2137,7 @@ function createAIBar() {
                 <label class="slb-field slb-prompt-field"><small>번역 추가 지시문 · AI 프로필 모드에서만 적용</small>
                     <textarea id="slb-translate-prompt" class="text_pole" rows="3" placeholder="번역 언어는 위 설정을 자동으로 따릅니다. 문체·존칭·용어 같은 추가 요구사항만 적어주세요. 예) 대사는 반말로, 지문은 건조한 문어체로. (구글 번역에는 적용되지 않습니다)"></textarea>
                     <span class="slb-prompt-meta">
-                        <small class="slb-ai-note">AI 수정·키워드 추천·원문 반영은 구글 번역 모드에서도 전용 프로필을 사용합니다.</small>
+                        <small class="slb-ai-note">AI 수정·키워드 추천은 전용 프로필을 사용합니다. 구글 번역 모드의 원문 부분 반영은 무료 구글 역번역을 사용합니다.</small>
                         <small id="slb-ai-status">확장 탭에서 번역 방식을 설정해주세요.</small>
                     </span>
                 </label>
@@ -1909,7 +2235,7 @@ function createAIBar() {
         saveSettingsDebounced();
         syncProviderUI();
         notify(provider.value === 'google'
-            ? '번역에 구글 번역(무료)을 사용합니다. AI 수정·키워드 추천·원문 반영에는 전용 프로필이 계속 필요합니다.'
+            ? '번역과 원문 부분 반영에 구글 번역(무료)을 사용합니다. AI 수정·키워드 추천만 전용 프로필이 필요합니다.'
             : '번역에 AI 전용 연결 프로필을 사용합니다.');
     });
     profile.addEventListener('change', () => {
@@ -3394,12 +3720,13 @@ async function translateEntrySource(ui, force = false, background = false) {
 }
 
 async function reflectEntryTranslation(ui) {
-    if (ui.flags.writingTranslation || ui.flags.translating) return;
+    if (ui.flags.writingTranslation || ui.flags.translating || ui.flags.composingTranslation) return;
     const translation = ui.translation.value;
     const source = ui.source.value;
     if (!translation.trim() || !source.trim()) return;
-    if (!getSettings().profileId) {
-        ui.status.textContent = '원문 반영은 AI 기능이라 전용 연결 프로필이 필요합니다. (구글 번역은 번역에만 사용됩니다.)';
+    const settings = getSettings();
+    if (settings.translationProvider !== 'google' && !settings.profileId) {
+        ui.status.textContent = 'AI 프로필 모드의 원문 반영에는 전용 연결 프로필이 필요합니다.';
         return;
     }
     const baseline = ui.reflectionBaseline;
@@ -3409,7 +3736,7 @@ async function reflectEntryTranslation(ui) {
     }
 
     ui.flags.translating = true;
-    setEntryBusy(ui, true, '수정된 번역 구간만 원문에 반영하는 중…');
+    setEntryBusy(ui, true, '수정된 번역 구간만 원문에 반영하고 검증하는 중…');
     try {
         const result = await reflectTranslationChangesInSource(source, baseline.text, translation);
         if (ui.translation.value !== translation || ui.source.value !== source) {
@@ -3425,7 +3752,12 @@ async function reflectEntryTranslation(ui) {
         ui.source.dispatchEvent(new Event('input', { bubbles: true }));
         ui.flags.writingSource = false;
         markTranslationSynced(ui, result.source, translation);
-        ui.status.textContent = `수정된 ${result.changedRegions}개 구간만 원문에 반영되었습니다.`;
+        ui.status.textContent = result.retried
+            ? `첫 결과를 폐기하고 자동 재생성하여 ${result.changedRegions}개 구간만 반영했습니다.`
+            : `수정된 ${result.changedRegions}개 구간만 원문에 반영되었습니다.`;
+        if (result.retried) {
+            notify(`첫 반영 결과를 폐기하고 1회 자동 재생성했습니다. 실패 이유: ${result.firstFailureReason}`, 'warning');
+        }
     } catch (error) {
         ui.status.textContent = error.message || '원문 반영에 실패했습니다.';
         notify(ui.status.textContent, 'error');
@@ -3436,16 +3768,23 @@ async function reflectEntryTranslation(ui) {
 }
 
 async function runSourceRevision(ui) {
-    const instruction = window.prompt('원문을 어떻게 수정할까요?');
+    const instruction = window.prompt('커서가 있는 원문 문단을 어떻게 수정할까요?');
     if (!instruction?.trim()) return;
-    setEntryBusy(ui, true, 'AI가 원문 수정안을 작성하는 중…');
+    const cursorPosition = ui.source.selectionStart;
+    setEntryBusy(ui, true, 'AI가 커서 위치의 원문 문단만 수정하는 중…');
     try {
-        const revised = await reviseText(ui.source.value, instruction.trim(), 'source');
+        const sourceSnapshot = ui.source.value;
+        const revised = await reviseTextAtCursor(sourceSnapshot, cursorPosition, instruction.trim(), 'source');
+        if (ui.source.value !== sourceSnapshot) {
+            ui.status.textContent = '수정 중 원문이 다시 변경되어 이전 결과를 적용하지 않았습니다.';
+            return;
+        }
         ui.flags.writingSource = true;
-        ui.source.value = revised;
+        ui.source.value = revised.text;
         ui.source.dispatchEvent(new Event('input', { bubbles: true }));
+        ui.source.setSelectionRange(revised.start, revised.end);
         ui.flags.writingSource = false;
-        ui.status.textContent = 'AI 원문 수정이 반영되었습니다.';
+        ui.status.textContent = '커서가 있던 원문 문단만 AI 수정되었습니다.';
         if (getSettings().autoTranslateSource) scheduleSourceTranslation(ui);
     } catch (error) {
         ui.status.textContent = error.message || 'AI 원문 수정에 실패했습니다.';
@@ -3456,14 +3795,21 @@ async function runSourceRevision(ui) {
 }
 
 async function runTranslationRevision(ui) {
-    const instruction = window.prompt('번역문을 어떻게 수정할까요?');
+    const instruction = window.prompt('커서가 있는 번역 문단을 어떻게 수정할까요?');
     if (!instruction?.trim()) return;
-    setEntryBusy(ui, true, 'AI가 번역 수정안을 작성하는 중…');
+    const cursorPosition = ui.translation.selectionStart;
+    setEntryBusy(ui, true, 'AI가 커서 위치의 번역 문단만 수정하는 중…');
     try {
-        const revised = await reviseText(ui.translation.value, instruction.trim(), 'translation');
-        ui.translation.value = revised;
-        savePendingTranslation(ui, revised);
-        ui.status.textContent = 'AI 번역 수정이 반영되었습니다.';
+        const translationSnapshot = ui.translation.value;
+        const revised = await reviseTextAtCursor(translationSnapshot, cursorPosition, instruction.trim(), 'translation');
+        if (ui.translation.value !== translationSnapshot) {
+            ui.status.textContent = '수정 중 번역본이 다시 변경되어 이전 결과를 적용하지 않았습니다.';
+            return;
+        }
+        ui.translation.value = revised.text;
+        ui.translation.setSelectionRange(revised.start, revised.end);
+        savePendingTranslation(ui, revised.text);
+        ui.status.textContent = '커서가 있던 번역 문단만 AI 수정되었습니다.';
         if (getSettings().autoSyncToSource) scheduleTranslationReflection(ui);
     } catch (error) {
         ui.status.textContent = error.message || 'AI 번역 수정에 실패했습니다.';
@@ -3879,7 +4225,12 @@ function enhanceEntry(entry) {
         autoSync,
         applyButton,
         reflectionBaseline: getTranslationReflectionBaseline(record, source.value),
-        flags: { writingSource: false, writingTranslation: false, translating: false },
+        flags: {
+            writingSource: false,
+            writingTranslation: false,
+            translating: false,
+            composingTranslation: false,
+        },
     };
 
     async function runKeywordRecommendation(instruction = '') {
@@ -3920,6 +4271,17 @@ function enhanceEntry(entry) {
     });
     translation.addEventListener('input', () => {
         if (ui.flags.writingTranslation) return;
+        if (ui.flags.composingTranslation) return;
+        savePendingTranslation(ui, ui.translation.value);
+        ui.status.textContent = getSettings().autoSyncToSource ? '번역 변경 감지 · 원문 반영 대기 중' : '번역 변경 감지 · 수동 반영 필요';
+        if (getSettings().autoSyncToSource) scheduleTranslationReflection(ui);
+    });
+    translation.addEventListener('compositionstart', () => {
+        ui.flags.composingTranslation = true;
+        clearTimeout(state.translationTimers.get(`${ui.book}:${ui.uid}`));
+    });
+    translation.addEventListener('compositionend', () => {
+        ui.flags.composingTranslation = false;
         savePendingTranslation(ui, ui.translation.value);
         ui.status.textContent = getSettings().autoSyncToSource ? '번역 변경 감지 · 원문 반영 대기 중' : '번역 변경 감지 · 수동 반영 필요';
         if (getSettings().autoSyncToSource) scheduleTranslationReflection(ui);
