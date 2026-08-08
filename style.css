@@ -4046,3 +4046,34 @@
         line-height: 32px !important;
     }
 }
+
+/* 데스크톱 전용 — 헤더 열 폭 축소 및 값 정중앙 정렬 */
+@media (min-width: 761px) {
+    #WorldInfo.slb-active .world_entry .slb-header-grid {
+        grid-template-columns:
+            minmax(140px, 1fr)
+            minmax(52px, 68px)
+            minmax(100px, 132px)
+            minmax(38px, 48px)
+            minmax(48px, 56px)
+            minmax(60px, 76px) !important;
+        column-gap: 6px !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-strategy-field > select,
+    #WorldInfo.slb-active .world_entry .slb-position-field > select {
+        text-align: center !important;
+        text-align-last: center !important;
+        padding-inline: 4px !important;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-depth-field > input,
+    #WorldInfo.slb-active .world_entry .slb-order-field > input,
+    #WorldInfo.slb-active .world_entry .slb-trigger-field > input {
+        text-align: center !important;
+        padding-inline: 2px !important;
+    }
+}
