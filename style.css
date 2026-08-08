@@ -3953,3 +3953,38 @@
     padding: 0 2px !important;
     line-height: normal !important;
 }
+
+
+/* v1.4.19 — 주입 아이콘 13px, 위치·깊이·순서·발동확률 값 13px 통일,
+   숫자칸 스피너 제거로 가로세로 진짜 정중앙 */
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-strategy-field select {
+    font-size: 13px !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-position-field select,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input {
+    font-size: 13px !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input {
+    -webkit-appearance: textfield !important;
+    -moz-appearance: textfield !important;
+    appearance: textfield !important;
+    text-align: center !important;
+    padding: 0 !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input::-webkit-outer-spin-button,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input::-webkit-inner-spin-button,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input::-webkit-outer-spin-button,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input::-webkit-inner-spin-button,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input::-webkit-outer-spin-button,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input::-webkit-inner-spin-button {
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    margin: 0 !important;
+}
