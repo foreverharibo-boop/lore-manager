@@ -155,6 +155,8 @@ function ensureCriticalLayoutStyles() {
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] .slb-filter-title{font-size:clamp(10px,2.45vw,.76em)!important;line-height:1.12!important;white-space:normal!important;overflow-wrap:break-word!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot{grid-area:exclude!important;position:static!important;width:100%!important;height:28px!important;padding:0!important;background:transparent!important;transform:none!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot>.slb-filter-exclude{height:28px!important;margin-inline:auto!important;font-size:.76em!important}
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field select,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field input{height:32px!important;min-height:32px!important;max-height:32px!important}
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input{line-height:32px!important}
 }`;
     document.head.append(style);
 }

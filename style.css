@@ -4030,3 +4030,19 @@
     line-height: 42px !important;
     text-align: center !important;
 }
+
+/* 모바일 전용 — 호출 조건 다섯 입력칸의 높이만 축소 */
+@media (max-width: 760px) {
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field select,
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field input {
+        height: 32px !important;
+        min-height: 32px !important;
+        max-height: 32px !important;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,
+    #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input {
+        line-height: 32px !important;
+    }
+}
