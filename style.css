@@ -3929,3 +3929,27 @@
     font-size: 16px !important;
     text-align: center !important;
 }
+
+
+/* v1.4.18 — 배지 배경은 JS가 제목 입력창 색을 복사(테마 자동 추종), 호출 조건 값 축소·정중앙 */
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell > .slb-mobile-entry-state-badge,
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell > .slb-mobile-entry-state-badge {
+    background: transparent !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-strategy-field select {
+    font-size: 15px !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-position-field select {
+    font-size: 14px !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input {
+    font-size: 14px !important;
+    text-align: center !important;
+    padding: 0 2px !important;
+    line-height: normal !important;
+}

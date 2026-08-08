@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.17';
+const VERSION = '1.4.18';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -136,6 +136,7 @@ function ensureCriticalLayoutStyles() {
 #slb-strategy-picker{display:flex!important;gap:6px!important;padding:8px!important;border-radius:12px!important;background:var(--SmartThemeBlurTintColor,rgba(28,28,32,.96))!important;border:1px solid var(--SmartThemeBorderColor,rgba(255,255,255,.18))!important;box-shadow:0 8px 22px rgba(0,0,0,.4)!important;z-index:9999!important}#slb-strategy-picker .slb-strategy-picker-option{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:38px!important;height:38px!important;font-size:17px!important;border-radius:9px!important;border:1px solid transparent!important;background:transparent!important;cursor:pointer!important;margin:0!important;padding:0!important}#slb-strategy-picker .slb-strategy-picker-option.is-current{border-color:var(--SmartThemeQuoteColor,#8aa)!important;background:rgba(255,255,255,.1)!important}#WorldInfo.slb-active .slb-mobile-entry-state-badge{cursor:pointer}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell,#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 28px auto!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge,#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge{width:28px!important;min-width:28px!important;max-width:28px!important;height:29px!important;align-self:center!important}#WorldInfo.slb-active .slb-mobile-entry-state-badge{position:relative}#WorldInfo.slb-active .slb-mobile-entry-state-badge:after{content:"";position:absolute;inset:3px 1px;border:1px solid var(--SmartThemeBorderColor,rgba(128,128,128,.55));border-radius:7px;pointer-events:none}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell,#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 38px auto!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge,#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge{width:38px!important;min-width:38px!important;max-width:38px!important;height:29px!important;min-height:29px!important;max-height:29px!important;align-self:center!important;background:#fff!important;border:1px solid var(--SmartThemeBorderColor,rgba(128,96,96,.6))!important;border-radius:9px!important}#WorldInfo.slb-active .slb-mobile-entry-state-badge:after{content:none!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge:before{width:14px!important;height:14px!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="vectorized"]:before{width:auto!important;height:auto!important;font-size:15px!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-strategy-field select{text-align:center!important;text-align-last:center!important;font-size:19px!important;line-height:1!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-position-field select{font-size:15px!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input{font-size:16px!important;text-align:center!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge,#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge{background:transparent!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-strategy-field select{font-size:15px!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-position-field select{font-size:14px!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input{font-size:14px!important;text-align:center!important;padding:0 2px!important;line-height:normal!important}
 @media(max-width:760px){
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 18px auto!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-header-grid{display:grid!important;box-sizing:border-box!important;grid-column:2!important;grid-row:1!important;grid-template-columns:minmax(0,1fr)!important;grid-template-rows:29px!important;gap:0!important;align-items:stretch!important;width:100%!important;min-width:0!important}
@@ -217,6 +218,14 @@ function syncMobileEntryStateBadge(entry) {
                 : 'normal';
     badge.dataset.state = value;
     badge.textContent = '';
+    // 제목 입력창의 실제 배경·테두리 색을 그대로 복사한다.
+    // 어떤 테마·커스텀 CSS에서도 제목 박스와 항상 같은 색이 된다.
+    const titleInput = entry.querySelector('.slb-title-field textarea, textarea[name="comment"]');
+    if (titleInput) {
+        const titleStyle = getComputedStyle(titleInput);
+        if (titleStyle.backgroundColor) badge.style.setProperty('background-color', titleStyle.backgroundColor, 'important');
+        if (titleStyle.borderColor) badge.style.setProperty('border-color', titleStyle.borderColor, 'important');
+    }
     badge.title = (value === 'constant'
         ? '상시 주입'
         : value === 'vectorized'
