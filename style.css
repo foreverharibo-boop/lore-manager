@@ -3846,3 +3846,32 @@
 #WorldInfo.slb-active .slb-mobile-entry-state-badge {
     cursor: pointer;
 }
+
+
+/* v1.4.16 — Strategy 배지를 라운드 사각형 칩으로 */
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell,
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell {
+    grid-template-columns: auto minmax(0, 1fr) 28px auto !important;
+}
+
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell > .slb-mobile-entry-state-badge,
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell > .slb-mobile-entry-state-badge {
+    width: 28px !important;
+    min-width: 28px !important;
+    max-width: 28px !important;
+    height: 29px !important;
+    align-self: center !important;
+}
+
+#WorldInfo.slb-active .slb-mobile-entry-state-badge {
+    position: relative;
+}
+
+#WorldInfo.slb-active .slb-mobile-entry-state-badge:after {
+    content: "";
+    position: absolute;
+    inset: 3px 1px;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.55));
+    border-radius: 7px;
+    pointer-events: none;
+}

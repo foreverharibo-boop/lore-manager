@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.15';
+const VERSION = '1.4.16';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -134,6 +134,7 @@ function ensureCriticalLayoutStyles() {
 #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-panel[data-panel="activation"].is-active>.slb-activation-overview[data-slb-visible="true"]:not(:empty){display:grid!important;visibility:visible!important;opacity:1!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 18px auto!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge{display:inline-flex!important;box-sizing:border-box!important;grid-column:3!important;grid-row:1!important;width:18px!important;min-width:18px!important;max-width:18px!important;height:29px!important;margin:0!important;padding:0!important;align-items:center!important;justify-content:center!important;border:0!important;background:transparent!important;visibility:visible!important;opacity:1!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-header-actions{grid-column:4!important;grid-row:1!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge:before{content:"";display:block!important;width:12px!important;height:12px!important;border-radius:50%!important;background:linear-gradient(145deg,#73eba4,#2bbd6c)!important;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="constant"]:before{background:linear-gradient(145deg,#72b8ff,#2563eb)!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="vectorized"]:before{content:"🔗"!important;width:auto!important;height:auto!important;border-radius:0!important;background:none!important;box-shadow:none!important}
 #slb-strategy-picker{display:flex!important;gap:6px!important;padding:8px!important;border-radius:12px!important;background:var(--SmartThemeBlurTintColor,rgba(28,28,32,.96))!important;border:1px solid var(--SmartThemeBorderColor,rgba(255,255,255,.18))!important;box-shadow:0 8px 22px rgba(0,0,0,.4)!important;z-index:9999!important}#slb-strategy-picker .slb-strategy-picker-option{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:38px!important;height:38px!important;font-size:17px!important;border-radius:9px!important;border:1px solid transparent!important;background:transparent!important;cursor:pointer!important;margin:0!important;padding:0!important}#slb-strategy-picker .slb-strategy-picker-option.is-current{border-color:var(--SmartThemeQuoteColor,#8aa)!important;background:rgba(255,255,255,.1)!important}#WorldInfo.slb-active .slb-mobile-entry-state-badge{cursor:pointer}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell,#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 28px auto!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge,#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge{width:28px!important;min-width:28px!important;max-width:28px!important;height:29px!important;align-self:center!important}#WorldInfo.slb-active .slb-mobile-entry-state-badge{position:relative}#WorldInfo.slb-active .slb-mobile-entry-state-badge:after{content:"";position:absolute;inset:3px 1px;border:1px solid var(--SmartThemeBorderColor,rgba(128,128,128,.55));border-radius:7px;pointer-events:none}
 @media(max-width:760px){
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 18px auto!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-header-grid{display:grid!important;box-sizing:border-box!important;grid-column:2!important;grid-row:1!important;grid-template-columns:minmax(0,1fr)!important;grid-template-rows:29px!important;gap:0!important;align-items:stretch!important;width:100%!important;min-width:0!important}
@@ -293,12 +294,17 @@ function openStrategyPicker(entry, badge) {
         picker.append(option);
     }
 
-    // 헤더/항목의 overflow 클리핑을 피하려고 body에 fixed로 띄운다.
+    // ST는 상단 드로어 '바깥' 탭을 감지해 드로어를 닫는다. 피커를 body에
+    // 두면 피커 탭 자체가 바깥 탭으로 판정되어 로어북 창이 접히므로,
+    // 반드시 #WorldInfo 내부에 두고 포인터 이벤트 전파도 끊는다.
     const rect = badge.getBoundingClientRect();
     picker.style.position = 'fixed';
     picker.style.top = `${Math.round(rect.bottom + 6)}px`;
     picker.style.left = `${Math.round(Math.max(8, Math.min(rect.right - 132, window.innerWidth - 148)))}px`;
-    document.body.append(picker);
+    for (const type of ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'mousedown', 'mouseup', 'click']) {
+        picker.addEventListener(type, event => event.stopPropagation());
+    }
+    (document.getElementById('WorldInfo') || document.body).append(picker);
 
     const dismiss = event => {
         if (event && picker.contains(event.target)) return;
@@ -3196,6 +3202,7 @@ function syncEntryInjectionState(entry) {
         data.vectorized = selectorValue === 'vectorized';
     }
     scheduleMobileEntryStateBadgeRepair(entry);
+    enforceActivationOverviewIntegrity();
     // 상태 변경 중에는 호출 조건 5개 필드의 부모를 절대 바꾸지 않는다.
     // ST 1.18의 네이티브 핸들러는 값만 저장하므로 DOM 복귀 작업도 불필요하다.
     if (previousValue === selectorValue) return;
@@ -4675,6 +4682,31 @@ function scheduleEntryTokenCount(book, uid, content) {
     state.entryTokenTimers.set(timerKey, timer);
 }
 
+function enforceActivationOverviewIntegrity() {
+    if (state.sorting) return;
+    for (const entry of renderedEntries()) {
+        const overview = entry.querySelector('.slb-activation-overview');
+        if (!overview) continue;
+        const panel = overview.closest('.slb-panel[data-panel="activation"]');
+        // 호출 조건 패널이 실제 화면에 렌더된 항목만 대상
+        if (!panel || panel.getClientRects().length === 0) continue;
+        const fields = getResponsiveHeaderFields(entry);
+        if (fields.length !== 5) continue;
+        const grid = entry.querySelector('.slb-header-grid');
+        // 데스크톱 정상 상태(전체 헤더 행에 필드 표시)는 건드리지 않는다
+        const desktopHealthy = grid
+            && !grid.classList.contains('slb-header-title-only')
+            && fields.every(field => field.parentElement === grid);
+        if (desktopHealthy) continue;
+        // 그 외에는 어떤 경로로 흩어졌든 무조건 overview로 되돌리고 표시한다
+        if (fields.some(field => field.parentElement !== overview)) overview.append(...fields);
+        entry.classList.add('slb-compact-entry');
+        grid?.classList.add('slb-header-title-only');
+        overview.hidden = false;
+        overview.dataset.slbVisible = 'true';
+    }
+}
+
 function syncLiveEditorTokens() {
     if (state.sorting || state.navDragging) return;
     if (document.visibilityState === 'hidden') return;
@@ -4980,7 +5012,10 @@ function init() {
     applyMobileDisplaySettings();
     scheduleEnhance();
     scheduleTokenSummary();
-    state.liveSyncTimer = setInterval(syncLiveEditorTokens, 1000);
+    state.liveSyncTimer = setInterval(() => {
+        enforceActivationOverviewIntegrity();
+        syncLiveEditorTokens();
+    }, 1000);
     console.info(`[로어북 매니저] v${VERSION} initialized`);
 }
 
