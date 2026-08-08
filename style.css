@@ -3814,12 +3814,16 @@
 /* v1.4.15 — 배지 탭 주입 방식 피커 */
 #slb-strategy-picker {
     display: flex;
-    gap: 6px;
-    padding: 8px;
-    border-radius: 12px;
+    position: absolute !important;
+    top: calc(100% + 4px) !important;
+    right: 0 !important;
+    left: auto !important;
+    gap: 4px;
+    padding: 5px;
+    border-radius: 9px;
     background: var(--SmartThemeBlurTintColor, rgba(28, 28, 32, 0.96));
     border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.18));
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 5px 14px rgba(0, 0, 0, 0.32);
     z-index: 9999;
 }
 
@@ -3827,10 +3831,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 38px;
-    height: 38px;
-    font-size: 17px;
-    border-radius: 9px;
+    width: 30px;
+    height: 30px;
+    font-size: 14px;
+    border-radius: 7px;
     border: 1px solid transparent;
     background: transparent;
     cursor: pointer;
@@ -3844,7 +3848,13 @@
 }
 
 #WorldInfo.slb-active .slb-mobile-entry-state-badge {
+    position: relative !important;
+    overflow: visible !important;
     cursor: pointer;
+}
+
+#WorldInfo.slb-active .slb-mobile-entry-state-badge.slb-picker-open {
+    z-index: 10000 !important;
 }
 
 
