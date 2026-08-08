@@ -3988,3 +3988,35 @@
     appearance: none !important;
     margin: 0 !important;
 }
+
+
+/* v1.4.20 — 호출 조건 다섯 컨트롤: 고정 42px + 패딩 0으로 잘림·치우침 기하학적 제거 */
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field select,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field input {
+    box-sizing: border-box !important;
+    height: 42px !important;
+    min-height: 42px !important;
+    max-height: 42px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-strategy-field select {
+    font-size: 13px !important;
+    text-align: center !important;
+    text-align-last: center !important;
+    line-height: normal !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-position-field select {
+    font-size: 13px !important;
+    padding: 0 4px !important;
+}
+
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,
+#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input {
+    font-size: 13px !important;
+    line-height: 42px !important;
+    text-align: center !important;
+}
