@@ -4052,7 +4052,7 @@
     #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell,
     #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell,
     #WorldInfo.slb-active .world_entry .slb-entry-header-shell {
-        grid-template-columns: auto minmax(0, 828px) max-content !important;
+        grid-template-columns: auto minmax(0, 1fr) max-content !important;
         justify-content: start !important;
         column-gap: 4px !important;
         padding-right: 4px !important;
@@ -4070,7 +4070,7 @@
     #WorldInfo.slb-active .world_entry .slb-entry-header-shell > .slb-header-grid {
         grid-column: 2 !important;
         grid-template-columns:
-            minmax(140px, 460px)
+            minmax(140px, 1fr)
             54px
             118px
             38px
@@ -4078,7 +4078,7 @@
             68px !important;
         column-gap: 4px !important;
         justify-content: start !important;
-        width: auto !important;
+        width: 100% !important;
         min-width: 0 !important;
         max-width: 100% !important;
     }
