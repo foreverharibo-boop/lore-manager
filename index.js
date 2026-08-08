@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.12';
+const VERSION = '1.4.14';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -2920,12 +2920,16 @@ function restoreNativeDragHandle(header, toggles) {
 function enhanceEntryHeader(entry) {
     if (!entry) return;
     bindEntryDrawerLifecycle(entry);
-    if (entry.dataset.slbHeaderEnhanced === VERSION) {
+    // 버전 문자열이 달라도(업데이트 직후, 과거 중복 설치 잔재) 구조가
+    // 온전하면 재사용한다. 완성된 헤더를 버전 불일치만으로 해체하면
+    // 네이티브 필드가 유실된다.
+    if (entry.dataset.slbHeaderEnhanced) {
         const existingShell = entry.querySelector('.slb-entry-header-shell');
         const existingGrid = entry.querySelector('.slb-header-grid');
         const existingTitle = existingGrid?.querySelector('.slb-title-field');
         const existingResponsiveFields = getResponsiveHeaderFields(entry);
         if (existingShell && existingGrid && existingTitle && existingResponsiveFields.length === 5) {
+            entry.dataset.slbHeaderEnhanced = VERSION;
             restoreNativeDragHandle(entry.querySelector('.slb-entry-header'), existingShell.querySelector('.slb-header-toggles'));
             syncEntryHeaderActions(entry);
             syncMobileEntryStateBadge(entry);
@@ -3398,7 +3402,10 @@ function restoreMobileActivationOverview(entry) {
 }
 
 function syncResponsiveEntryLayouts() {
-    renderedEntries().forEach(placeResponsiveHeaderFields);
+    // forEach(placeResponsiveHeaderFields)로 직접 넘기면 두 번째 인자
+    // (인덱스)가 forceCompact로 들어가 첫 항목을 제외한 전부가 강제
+    // 컴팩트가 된다 — 데스크톱에서 헤더 필드가 사라지던 원인.
+    renderedEntries().forEach(entry => placeResponsiveHeaderFields(entry));
 }
 
 function scheduleResponsiveEntryLayouts() {
@@ -3891,8 +3898,11 @@ function enhanceEntry(entry) {
     if (!entry) return;
     const edit = queryCompatible(entry, ['.world_entry_edit', '.world-entry-edit', '[data-role="entry-editor"]']);
     if (!edit) return;
-    if (edit.dataset.slbEnhanced === VERSION) {
-        if (hasCompleteEnhancedEditor(edit)) return;
+    if (edit.dataset.slbEnhanced) {
+        if (hasCompleteEnhancedEditor(edit)) {
+            edit.dataset.slbEnhanced = VERSION;
+            return;
+        }
         // ST가 같은 editor 요소의 children만 네이티브 폼으로 교체하면 marker만
         // 남는다. 확장 구조가 완전히 사라진 경우에만 안전하게 다시 구성한다.
         const staleCustomStructure = Array.from(edit.children).some(child => (
@@ -4867,7 +4877,9 @@ function init() {
                 const entry = record.target?.closest?.('.world_entry');
                 if (entry?.isConnected) changedEntries.add(entry);
             }
-            changedEntries.forEach(placeResponsiveHeaderFields);
+            // Set.forEach는 (값, 값)을 넘기므로 forceCompact가 요소(truthy)로
+            // 오염된다. 반드시 요소만 전달한다.
+            changedEntries.forEach(entry => placeResponsiveHeaderFields(entry));
         });
     }
     applyMobileDisplaySettings();
@@ -4877,4 +4889,17 @@ function init() {
     console.info(`[로어북 매니저] v${VERSION} initialized`);
 }
 
-jQuery(init);
+jQuery(() => {
+    // 확장이 두 폴더로 중복 설치되면(예: simple-lorebook + lore-manager-main)
+    // 두 인스턴스가 서로의 개조 마커를 부정하며 헤더를 이중 개조해
+    // 네이티브 필드가 실종된다. 두 번째 인스턴스는 기동 자체를 막는다.
+    if (window.__slbLoreManagerActive) {
+        console.warn(`[로어북 매니저] v${VERSION} 로드가 무시되었습니다: 이미 다른 사본(v${window.__slbLoreManagerActive})이 실행 중입니다. extensions 폴더에 로어북 매니저 폴더가 두 개 이상 있는지 확인하고 하나만 남겨주세요.`);
+        if (typeof toastr !== 'undefined') {
+            toastr.warning('로어북 매니저가 두 번 설치되어 있습니다. extensions 폴더에서 중복 폴더를 삭제하고 하나만 남겨주세요.', '로어북 매니저 중복 설치 감지', { timeOut: 12000 });
+        }
+        return;
+    }
+    window.__slbLoreManagerActive = VERSION;
+    init();
+});
