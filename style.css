@@ -4100,6 +4100,7 @@
         min-width: max-content !important;
         max-width: none !important;
         justify-self: end !important;
+        align-self: end !important;
         gap: 3px !important;
         padding: 0 !important;
         overflow: visible !important;
