@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.11';
+const VERSION = '1.4.12';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -132,6 +132,7 @@ function ensureCriticalLayoutStyles() {
 #slb-ai-tools #slb-quick-options-host>.slb-quick-options>label{display:inline-flex!important;min-width:0!important;align-items:center!important;gap:4px!important;white-space:nowrap!important;word-break:keep-all!important;overflow-wrap:normal!important}
 #slb-ai-tools #slb-quick-options-host>.slb-quick-options>label:last-child{grid-column:1/-1!important}
 #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-panel[data-panel="activation"].is-active>.slb-activation-overview[data-slb-visible="true"]:not(:empty){display:grid!important;visibility:visible!important;opacity:1!important}
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 18px auto!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge{display:inline-flex!important;box-sizing:border-box!important;grid-column:3!important;grid-row:1!important;width:18px!important;min-width:18px!important;max-width:18px!important;height:29px!important;margin:0!important;padding:0!important;align-items:center!important;justify-content:center!important;border:0!important;background:transparent!important;visibility:visible!important;opacity:1!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-header-actions{grid-column:4!important;grid-row:1!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge:before{content:"";display:block!important;width:12px!important;height:12px!important;border-radius:50%!important;background:linear-gradient(145deg,#73eba4,#2bbd6c)!important;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="constant"]:before{background:linear-gradient(145deg,#72b8ff,#2563eb)!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="vectorized"]:before{content:"🔗"!important;width:auto!important;height:auto!important;border-radius:0!important;background:none!important;box-shadow:none!important}
 @media(max-width:760px){
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 18px auto!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-header-grid{display:grid!important;box-sizing:border-box!important;grid-column:2!important;grid-row:1!important;grid-template-columns:minmax(0,1fr)!important;grid-template-rows:29px!important;gap:0!important;align-items:stretch!important;width:100%!important;min-width:0!important}
@@ -2149,7 +2150,7 @@ function createAIBar() {
                 <div class="slb-mobile-display-settings">
                     <small class="slb-mobile-display-title">모바일 로어북 표시</small>
                     <div class="slb-mobile-display-options">
-                        <label><input type="checkbox" id="slb-show-mobile-entry-state"> 제목 옆 주입 방식 표시</label>
+                        <label><input type="checkbox" id="slb-show-mobile-entry-state"> Strategy(주입 방식) 제목 옆 표시</label>
                         <label><input type="checkbox" id="slb-show-mobile-token-summary"> 토큰 통계 표시</label>
                         <label><input type="checkbox" id="slb-show-mobile-entry-filters"> 항목 필터 표시</label>
                     </div>
@@ -3178,14 +3179,35 @@ function bindEntryDrawerLifecycle(entry) {
     // nested drawer 이벤트는 버블링되므로 event.target으로 제외한다.
     drawer.addEventListener('inline-drawer-toggle', event => {
         if (event.target !== drawer) return;
-        entry.dataset.slbDrawerOpen = String(isEntryDrawerOpen(entry));
-        placeResponsiveHeaderFields(entry);
+        const syncFromRender = () => {
+            if (!entry.isConnected) return;
+            // 아이콘이 아니라 실제 렌더 여부로 열림/닫힘을 기록한다.
+            // 애니메이션으로 늦게 닫히는 경우를 위해 ST의 1초 지연 정리
+            // (clearEntryList) 전에 두 번 더 재확인해 필드를 회수한다.
+            entry.dataset.slbDrawerOpen = String(isEntryEditorRendered(entry));
+            placeResponsiveHeaderFields(entry);
+        };
+        syncFromRender();
+        setTimeout(syncFromRender, 300);
+        setTimeout(syncFromRender, 700);
     });
+}
+
+function isEntryEditorRendered(entry) {
+    // 아이콘 클래스 판독 대신 편집 영역이 실제로 렌더 중인지 본다.
+    // display:none 조상이 있으면 rect가 0개이므로 기기/모드와 무관하게 정확하다.
+    const drawer = getEntryDrawer(entry);
+    const outlet = drawer && queryCompatible(drawer, [
+        ':scope > .inline-drawer-outlet',
+        '.inline-drawer-outlet',
+        ':scope > .inline-drawer-content',
+    ]);
+    return Boolean(outlet && outlet.getClientRects().length > 0);
 }
 
 function isEntryDrawerStablyOpen(entry) {
     if (!entry) return false;
-    const liveOpen = isEntryDrawerOpen(entry);
+    const liveOpen = isEntryEditorRendered(entry) || isEntryDrawerOpen(entry);
     if (!entry.dataset.slbDrawerOpen) {
         entry.dataset.slbDrawerOpen = String(liveOpen);
     }
@@ -3313,11 +3335,30 @@ function placeResponsiveHeaderFields(entry, forceCompact = false) {
         scheduleNativeHeaderRecovery(entry);
         return;
     }
+    // 기기·브라우저 모드와 무관한 결정적 신호: 호출 조건 패널이 실제로
+    // 화면에 렌더되어 있는가. (display:none 조상이 있으면 rect가 0개)
+    const activationPanel = overview?.closest('.slb-panel[data-panel="activation"]');
+    const panelVisible = Boolean(activationPanel && activationPanel.getClientRects().length > 0);
+
+    // 다섯 필드가 이미 화면에 보이는 overview 안에 있다면 그 상태가 정답이다.
+    // 주입 방식을 연속 변경하면 셀렉트 표시 폭이 바뀌며 ResizeObserver가 이
+    // 함수를 반복 호출하는데, 그 순간의 픽셀 측정·아이콘 판독이 한 번이라도
+    // 어긋나도 보이는 줄을 해체하지 않는다. (해제는 패널이 화면에서 사라진
+    // 뒤에만 일어난다)
+    if (panelVisible && overview && fields.every(field => field.parentElement === overview)) {
+        entry.classList.add('slb-compact-entry');
+        grid.classList.add('slb-header-title-only');
+        overview.hidden = false;
+        overview.dataset.slbVisible = 'true';
+        return;
+    }
+
     const compact = forceCompact || shouldUseCompactHeader(entry);
-    const activationActive = entry.dataset.slbActiveTab === 'activation' || Boolean(overview
-        ?.closest('.slb-panel[data-panel="activation"]')
+    const activationActive = entry.dataset.slbActiveTab === 'activation' || Boolean(activationPanel
         ?.classList.contains('is-active'));
-    const drawerOpen = isEntryDrawerStablyOpen(entry);
+    // 패널이 렌더되어 있으면 드로어는 확실히 열려 있다. 아이콘/표식 판정은
+    // 보조 신호로만 쓴다.
+    const drawerOpen = panelVisible || isEntryDrawerStablyOpen(entry);
     // 좁은 화면에서도 호출 조건 탭을 보고 있을 때만 editOutlet 내부로
     // 이동한다. 그 외에는 삭제되지 않는 헤더 stash에 안전하게 보관한다.
     const target = compact
@@ -4580,7 +4621,7 @@ function syncLiveEditorTokens() {
         // 입력/change 이벤트가 실제 편집은 즉시 처리한다. 이 폴링은 이벤트를
         // 거치지 않은 프로그램적 변경만 보완하므로 열린 항목만 검사한다.
         // 접힌 모든 원문을 매번 해시하면 긴 로어북에서 모바일 UI가 멎는다.
-        if (!isEntryDrawerOpen(entryElement)) continue;
+        if (!isEntryEditorRendered(entryElement)) continue;
         const source = entryElement.querySelector('textarea[name="content"]');
         if (!source) continue;
         const sourceHash = hashText(source.value);
@@ -4770,7 +4811,7 @@ function bindEvents() {
             // 일부 ST/확장 조합이 저장 뒤 같은 editor 노드의 내용만 교체해도
             // stale marker 때문에 탭 재구성을 건너뛰지 않도록 제한적으로 확인한다.
             const brokenOpenEditor = renderedEntries().some(entry => {
-                if (!isEntryDrawerOpen(entry)) return false;
+                if (!isEntryEditorRendered(entry)) return false;
                 const edit = queryCompatible(entry, ['.world_entry_edit', '.world-entry-edit', '[data-role="entry-editor"]']);
                 return getResponsiveHeaderFields(entry).length !== 5
                     || (edit?.dataset.slbEnhanced === VERSION && !hasCompleteEnhancedEditor(edit));
