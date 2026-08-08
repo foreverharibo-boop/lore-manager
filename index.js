@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.14';
+const VERSION = '1.4.15';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -133,6 +133,7 @@ function ensureCriticalLayoutStyles() {
 #slb-ai-tools #slb-quick-options-host>.slb-quick-options>label:last-child{grid-column:1/-1!important}
 #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-panel[data-panel="activation"].is-active>.slb-activation-overview[data-slb-visible="true"]:not(:empty){display:grid!important;visibility:visible!important;opacity:1!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 18px auto!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge{display:inline-flex!important;box-sizing:border-box!important;grid-column:3!important;grid-row:1!important;width:18px!important;min-width:18px!important;max-width:18px!important;height:29px!important;margin:0!important;padding:0!important;align-items:center!important;justify-content:center!important;border:0!important;background:transparent!important;visibility:visible!important;opacity:1!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-header-actions{grid-column:4!important;grid-row:1!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge:before{content:"";display:block!important;width:12px!important;height:12px!important;border-radius:50%!important;background:linear-gradient(145deg,#73eba4,#2bbd6c)!important;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="constant"]:before{background:linear-gradient(145deg,#72b8ff,#2563eb)!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="vectorized"]:before{content:"🔗"!important;width:auto!important;height:auto!important;border-radius:0!important;background:none!important;box-shadow:none!important}
+#slb-strategy-picker{display:flex!important;gap:6px!important;padding:8px!important;border-radius:12px!important;background:var(--SmartThemeBlurTintColor,rgba(28,28,32,.96))!important;border:1px solid var(--SmartThemeBorderColor,rgba(255,255,255,.18))!important;box-shadow:0 8px 22px rgba(0,0,0,.4)!important;z-index:9999!important}#slb-strategy-picker .slb-strategy-picker-option{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:38px!important;height:38px!important;font-size:17px!important;border-radius:9px!important;border:1px solid transparent!important;background:transparent!important;cursor:pointer!important;margin:0!important;padding:0!important}#slb-strategy-picker .slb-strategy-picker-option.is-current{border-color:var(--SmartThemeQuoteColor,#8aa)!important;background:rgba(255,255,255,.1)!important}#WorldInfo.slb-active .slb-mobile-entry-state-badge{cursor:pointer}
 @media(max-width:760px){
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 18px auto!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-header-grid{display:grid!important;box-sizing:border-box!important;grid-column:2!important;grid-row:1!important;grid-template-columns:minmax(0,1fr)!important;grid-template-rows:29px!important;gap:0!important;align-items:stretch!important;width:100%!important;min-width:0!important}
@@ -214,12 +215,106 @@ function syncMobileEntryStateBadge(entry) {
                 : 'normal';
     badge.dataset.state = value;
     badge.textContent = '';
-    badge.title = value === 'constant'
+    badge.title = (value === 'constant'
         ? '상시 주입'
         : value === 'vectorized'
             ? '벡터화'
-            : '선택 주입';
+            : '선택 주입') + ' · 탭하여 변경';
     badge.setAttribute('aria-label', badge.title);
+    badge.setAttribute('role', 'button');
+
+    if (!badge.dataset.slbTapBound) {
+        badge.dataset.slbTapBound = '1';
+        badge.addEventListener('click', event => {
+            // ST는 헤더 전체가 드로어 토글이므로, 배지 탭이 항목을
+            // 접거나 펴지 않도록 전파를 반드시 끊는다.
+            event.preventDefault();
+            event.stopPropagation();
+            openStrategyPicker(entry, badge);
+        });
+        badge.addEventListener('pointerdown', event => event.stopPropagation());
+    }
+}
+
+function applyEntryStrategy(entry, value) {
+    const selector = queryCompatible(entry, [
+        'select[name="entryStateSelector"]',
+        'select[name="entryStatus"]',
+        'select[name="entryState"]',
+        'select.WIEntryStatusSelect',
+        'select.world_entry_state',
+        'select.entryStateSelector',
+    ]);
+    if (!selector || selector.value === value) return;
+    // 네이티브 셀렉트 값을 바꾸고 input을 그대로 쏘면 ST 원본 핸들러가
+    // 데이터 갱신·저장을 처리한다. 호출 조건 탭의 셀렉트는 같은 요소라
+    // 별도 동기화 없이 값이 항상 일치한다.
+    selector.value = value;
+    selector.dispatchEvent(new Event('input', { bubbles: true }));
+    // 워크스페이스 input 리스너와 무관하게 배지·토큰 요약 동기화를 보장한다.
+    scheduleEntryInjectionStateSync(entry);
+}
+
+function closeStrategyPicker() {
+    const picker = document.getElementById('slb-strategy-picker');
+    if (!picker) return;
+    picker.__slbCleanup?.();
+    picker.remove();
+}
+
+function openStrategyPicker(entry, badge) {
+    if (document.getElementById('slb-strategy-picker')?.dataset.uid === getUid(entry)) {
+        closeStrategyPicker();
+        return;
+    }
+    closeStrategyPicker();
+    const picker = createElement('div', 'slb-strategy-picker');
+    picker.id = 'slb-strategy-picker';
+    picker.dataset.uid = getUid(entry);
+    picker.setAttribute('role', 'menu');
+    const current = badge.dataset.state || 'normal';
+    for (const [value, label, title] of [
+        ['constant', '🔵', '상시 주입'],
+        ['normal', '🟢', '선택 주입'],
+        ['vectorized', '🔗', '벡터화'],
+    ]) {
+        const option = createElement('button', 'slb-strategy-picker-option');
+        option.type = 'button';
+        option.textContent = label;
+        option.title = title;
+        option.setAttribute('aria-label', title);
+        if (current === value) option.classList.add('is-current');
+        option.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            applyEntryStrategy(entry, value);
+            closeStrategyPicker();
+        });
+        picker.append(option);
+    }
+
+    // 헤더/항목의 overflow 클리핑을 피하려고 body에 fixed로 띄운다.
+    const rect = badge.getBoundingClientRect();
+    picker.style.position = 'fixed';
+    picker.style.top = `${Math.round(rect.bottom + 6)}px`;
+    picker.style.left = `${Math.round(Math.max(8, Math.min(rect.right - 132, window.innerWidth - 148)))}px`;
+    document.body.append(picker);
+
+    const dismiss = event => {
+        if (event && picker.contains(event.target)) return;
+        closeStrategyPicker();
+    };
+    const dismissOnScroll = () => closeStrategyPicker();
+    setTimeout(() => {
+        document.addEventListener('pointerdown', dismiss, true);
+        window.addEventListener('scroll', dismissOnScroll, { passive: true, capture: true });
+        window.addEventListener('resize', dismissOnScroll, { passive: true });
+    }, 0);
+    picker.__slbCleanup = () => {
+        document.removeEventListener('pointerdown', dismiss, true);
+        window.removeEventListener('scroll', dismissOnScroll, { capture: true });
+        window.removeEventListener('resize', dismissOnScroll);
+    };
 }
 
 function repairMobileEntryStateBadge(entry) {
