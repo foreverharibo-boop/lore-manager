@@ -4049,18 +4049,47 @@
 
 /* 데스크톱 전용 — 헤더 열 폭 축소 및 값 정중앙 정렬 */
 @media (min-width: 761px) {
+    #WorldInfo.slb-active .world_entry .slb-entry-header-shell {
+        grid-template-columns: auto minmax(0, 1fr) max-content !important;
+        column-gap: 4px !important;
+        padding-right: 4px !important;
+        overflow: visible !important;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-toggles {
+        grid-column: 1 !important;
+    }
+
     #WorldInfo.slb-active .world_entry .slb-header-grid {
+        grid-column: 2 !important;
         grid-template-columns:
-            minmax(140px, 1fr)
-            minmax(52px, 68px)
-            minmax(100px, 132px)
-            minmax(38px, 48px)
-            minmax(48px, 56px)
-            minmax(60px, 76px) !important;
-        column-gap: 6px !important;
+            minmax(120px, 1fr)
+            54px
+            118px
+            38px
+            50px
+            68px !important;
+        column-gap: 4px !important;
         width: 100% !important;
         min-width: 0 !important;
         max-width: 100% !important;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-mobile-entry-state-badge {
+        display: none !important;
+    }
+
+    #WorldInfo.slb-active .world_entry .slb-header-actions {
+        grid-column: 3 !important;
+        display: flex !important;
+        flex: 0 0 max-content !important;
+        width: max-content !important;
+        min-width: max-content !important;
+        max-width: none !important;
+        justify-self: end !important;
+        gap: 3px !important;
+        padding: 0 !important;
+        overflow: visible !important;
     }
 
     #WorldInfo.slb-active .world_entry .slb-strategy-field > select,
