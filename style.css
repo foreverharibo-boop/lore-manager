@@ -4148,3 +4148,33 @@
     top: auto !important;
     bottom: calc(100% + 4px) !important;
 }
+
+
+/* v1.4.23 — iPad·좁은 데스크톱 패널에서도 컴팩트 행의 Strategy 배지 유지 */
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell {
+    grid-template-columns: auto minmax(0, 1fr) 38px auto !important;
+}
+
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell > .slb-mobile-entry-state-badge {
+    display: inline-flex !important;
+    box-sizing: border-box !important;
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+    width: 38px !important;
+    min-width: 38px !important;
+    max-width: 38px !important;
+    height: 29px !important;
+    min-height: 29px !important;
+    max-height: 29px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-items: center !important;
+    justify-content: center !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell > .slb-header-actions {
+    grid-column: 4 !important;
+    grid-row: 1 !important;
+}
