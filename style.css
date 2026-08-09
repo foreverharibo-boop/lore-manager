@@ -4141,3 +4141,10 @@
         margin: 0 !important;
     }
 }
+
+
+/* v1.4.21 — 아래 공간 부족 시 피커를 배지 위로 */
+#slb-strategy-picker.slb-picker-up {
+    top: auto !important;
+    bottom: calc(100% + 4px) !important;
+}

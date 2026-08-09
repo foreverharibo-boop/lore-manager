@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.20';
+const VERSION = '1.4.22';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -93,6 +93,8 @@ const state = {
     sourceTimers: new Map(),
     translationTimers: new Map(),
     entryStateSyncTimers: new WeakMap(),
+    entryFilterRefreshPending: false,
+    entryFilterRefreshTimer: null,
     entryStateValues: new WeakMap(),
     headerRecoveryTimers: new WeakMap(),
     headerRecoveryAttempts: new WeakMap(),
@@ -150,6 +152,7 @@ function ensureCriticalLayoutStyles() {
 #WorldInfo.slb-active .world_entry .slb-header-grid>.slb-depth-field>input,#WorldInfo.slb-active .world_entry .slb-header-grid>.slb-order-field>input,#WorldInfo.slb-active .world_entry .slb-header-grid>.slb-trigger-field>input{-webkit-appearance:textfield!important;-moz-appearance:textfield!important;appearance:textfield!important;text-align:center!important;text-align-last:center!important;text-indent:0!important;padding:0!important}
 #WorldInfo.slb-active .world_entry .slb-header-grid>.slb-depth-field>input::-webkit-outer-spin-button,#WorldInfo.slb-active .world_entry .slb-header-grid>.slb-depth-field>input::-webkit-inner-spin-button,#WorldInfo.slb-active .world_entry .slb-header-grid>.slb-order-field>input::-webkit-outer-spin-button,#WorldInfo.slb-active .world_entry .slb-header-grid>.slb-order-field>input::-webkit-inner-spin-button,#WorldInfo.slb-active .world_entry .slb-header-grid>.slb-trigger-field>input::-webkit-outer-spin-button,#WorldInfo.slb-active .world_entry .slb-header-grid>.slb-trigger-field>input::-webkit-inner-spin-button{-webkit-appearance:none!important;appearance:none!important;margin:0!important}
 }
+#slb-strategy-picker.slb-picker-up{top:auto!important;bottom:calc(100% + 4px)!important}
 @media(max-width:760px){
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 18px auto!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-header-grid{display:grid!important;box-sizing:border-box!important;grid-column:2!important;grid-row:1!important;grid-template-columns:minmax(0,1fr)!important;grid-template-rows:29px!important;gap:0!important;align-items:stretch!important;width:100%!important;min-width:0!important}
@@ -200,6 +203,31 @@ function getSettings() {
     return settings;
 }
 
+// 제목 입력창의 실제 배경·테두리 색을 배지에 복사한다.
+// 다크테마 등 테마 CSS가 늦게 적용되거나 무드등으로 실시간 변경되는 경우가
+// 있으므로, 1초 루프에서 반복 호출해 스냅샷이 아닌 라이브 추종으로 만든다.
+function applyBadgeThemeColor(entry, badge) {
+    const titleInput = entry.querySelector('.slb-title-field textarea, textarea[name="comment"]');
+    if (!titleInput || !badge) return;
+    const titleStyle = getComputedStyle(titleInput);
+    if (titleStyle.backgroundColor && badge.dataset.slbBg !== titleStyle.backgroundColor) {
+        badge.dataset.slbBg = titleStyle.backgroundColor;
+        badge.style.setProperty('background-color', titleStyle.backgroundColor, 'important');
+    }
+    if (titleStyle.borderColor && badge.dataset.slbBorder !== titleStyle.borderColor) {
+        badge.dataset.slbBorder = titleStyle.borderColor;
+        badge.style.setProperty('border-color', titleStyle.borderColor, 'important');
+    }
+}
+
+function refreshBadgeThemeColors() {
+    if (!getSettings().showMobileEntryState) return;
+    for (const entry of renderedEntries()) {
+        const badge = entry.querySelector('.slb-mobile-entry-state-badge');
+        if (badge) applyBadgeThemeColor(entry, badge);
+    }
+}
+
 function syncMobileEntryStateBadge(entry) {
     if (!entry) return;
     const shell = entry.querySelector('.slb-entry-header-shell');
@@ -233,14 +261,7 @@ function syncMobileEntryStateBadge(entry) {
                 : 'normal';
     badge.dataset.state = value;
     badge.textContent = '';
-    // 제목 입력창의 실제 배경·테두리 색을 그대로 복사한다.
-    // 어떤 테마·커스텀 CSS에서도 제목 박스와 항상 같은 색이 된다.
-    const titleInput = entry.querySelector('.slb-title-field textarea, textarea[name="comment"]');
-    if (titleInput) {
-        const titleStyle = getComputedStyle(titleInput);
-        if (titleStyle.backgroundColor) badge.style.setProperty('background-color', titleStyle.backgroundColor, 'important');
-        if (titleStyle.borderColor) badge.style.setProperty('border-color', titleStyle.borderColor, 'important');
-    }
+    applyBadgeThemeColor(entry, badge);
     badge.title = (value === 'constant'
         ? '상시 주입'
         : value === 'vectorized'
@@ -331,6 +352,18 @@ function openStrategyPicker(entry, badge) {
         picker.addEventListener(type, event => event.stopPropagation());
     }
     badge.append(picker);
+
+    // 목록 맨 아래 항목처럼 아래 공간이 부족하면(패널 경계에 가려짐)
+    // 피커를 배지 위쪽으로 펼친다.
+    const panel = badge.closest('#WorldInfo');
+    const badgeRect = badge.getBoundingClientRect();
+    const lowerBound = Math.min(
+        window.innerHeight,
+        panel ? panel.getBoundingClientRect().bottom : window.innerHeight,
+    );
+    if (lowerBound - badgeRect.bottom < 56) {
+        picker.classList.add('slb-picker-up');
+    }
 
     const dismiss = event => {
         if (event && picker.contains(event.target)) return;
@@ -3209,6 +3242,20 @@ function syncEntryActiveState(entry) {
     renderTokenSummary(currentBookName(), state.currentBookData);
 }
 
+function refreshEntryStateFilterIfIdle() {
+    const filter = getSettings().entryFilter || 'all';
+    if (filter === 'all') return;
+    // 열린 편집기가 있으면 재렌더가 편집기를 파괴하므로 닫힐 때까지 미룬다.
+    if (renderedEntries().some(isEntryEditorRendered)) {
+        state.entryFilterRefreshPending = true;
+        return;
+    }
+    state.entryFilterRefreshPending = false;
+    // setFilterData가 ST FilterHelper의 onDataChanged(updateEditor)를 호출해
+    // 목록이 현재 데이터 기준으로 다시 필터링된다.
+    worldInfoFilter.setFilterData(ENTRY_STATE_FILTER, filter);
+}
+
 function syncEntryInjectionState(entry) {
     if (!entry?.isConnected) return;
     const uid = getUid(entry);
@@ -3230,6 +3277,8 @@ function syncEntryInjectionState(entry) {
         data.vectorized = selectorValue === 'vectorized';
     }
     scheduleMobileEntryStateBadgeRepair(entry);
+    clearTimeout(state.entryFilterRefreshTimer);
+    state.entryFilterRefreshTimer = setTimeout(refreshEntryStateFilterIfIdle, 150);
     enforceActivationOverviewIntegrity();
     // 상태 변경 중에는 호출 조건 5개 필드의 부모를 절대 바꾸지 않는다.
     // ST 1.18의 네이티브 핸들러는 값만 저장하므로 DOM 복귀 작업도 불필요하다.
@@ -3313,6 +3362,9 @@ function bindEntryDrawerLifecycle(entry) {
     // nested drawer 이벤트는 버블링되므로 event.target으로 제외한다.
     drawer.addEventListener('inline-drawer-toggle', event => {
         if (event.target !== drawer) return;
+        if (state.entryFilterRefreshPending) {
+            setTimeout(refreshEntryStateFilterIfIdle, 350);
+        }
         const syncFromRender = () => {
             if (!entry.isConnected) return;
             // 아이콘이 아니라 실제 렌더 여부로 열림/닫힘을 기록한다.
@@ -5042,6 +5094,7 @@ function init() {
     scheduleTokenSummary();
     state.liveSyncTimer = setInterval(() => {
         enforceActivationOverviewIntegrity();
+        refreshBadgeThemeColors();
         syncLiveEditorTokens();
     }, 1000);
     console.info(`[로어북 매니저] v${VERSION} initialized`);
