@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.45';
+const VERSION = '1.4.46';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -125,6 +125,8 @@ const state = {
     worldSelectUserIntentUntil: 0,
     responsiveMedia: null,
     responsiveObserver: null,
+    responsiveObserverTarget: null,
+    responsiveObservedWidth: 0,
     responsiveRaf: 0,
     foldyDeleteSafetyRunId: 0,
     foldyLoreLayoutPersistedSignature: '',
@@ -332,29 +334,47 @@ function getSettings() {
 // 제목 입력창의 실제 배경·테두리 색을 배지에 복사한다.
 // 다크테마 등 테마 CSS가 늦게 적용되거나 무드등으로 실시간 변경되는 경우가
 // 있으므로, 1초 루프에서 반복 호출해 스냅샷이 아닌 라이브 추종으로 만든다.
-function applyBadgeThemeColor(entry, badge) {
+function readBadgeThemeColor(entry) {
     const titleInput = entry.querySelector('.slb-title-field textarea, textarea[name="comment"]');
-    if (!titleInput || !badge) return;
+    if (!titleInput) return null;
     const titleStyle = getComputedStyle(titleInput);
-    if (titleStyle.backgroundColor && badge.dataset.slbBg !== titleStyle.backgroundColor) {
-        badge.dataset.slbBg = titleStyle.backgroundColor;
-        badge.style.setProperty('background-color', titleStyle.backgroundColor, 'important');
+    return {
+        backgroundColor: titleStyle.backgroundColor || '',
+        borderColor: titleStyle.borderColor || '',
+    };
+}
+
+function applyBadgeThemeColor(entry, badge, theme = null) {
+    if (!badge) return;
+    const colors = theme || readBadgeThemeColor(entry);
+    if (!colors) return;
+    if (colors.backgroundColor && badge.dataset.slbBg !== colors.backgroundColor) {
+        badge.dataset.slbBg = colors.backgroundColor;
+        badge.style.setProperty('background-color', colors.backgroundColor, 'important');
     }
-    if (titleStyle.borderColor && badge.dataset.slbBorder !== titleStyle.borderColor) {
-        badge.dataset.slbBorder = titleStyle.borderColor;
-        badge.style.setProperty('border-color', titleStyle.borderColor, 'important');
+    if (colors.borderColor && badge.dataset.slbBorder !== colors.borderColor) {
+        badge.dataset.slbBorder = colors.borderColor;
+        badge.style.setProperty('border-color', colors.borderColor, 'important');
     }
 }
 
-function refreshBadgeThemeColors() {
+function refreshBadgeThemeColors(entries = renderedEntries()) {
     if (!getSettings().showMobileEntryState) return;
-    for (const entry of renderedEntries()) {
+    // 모든 제목 입력창은 보통 같은 테마 규칙을 쓴다. 클래스와 인라인
+    // 스타일이 같은 입력은 계산된 색도 같으므로 한 번만 읽어 공유한다.
+    // 서로 다른 사용자 스타일이 있는 경우에는 그 조합만 별도로 읽는다.
+    const themeByStyle = new Map();
+    for (const entry of entries) {
         const badge = entry.querySelector('.slb-mobile-entry-state-badge');
-        if (badge) applyBadgeThemeColor(entry, badge);
+        const titleInput = entry.querySelector('.slb-title-field textarea, textarea[name="comment"]');
+        if (!badge || !titleInput) continue;
+        const styleKey = `${titleInput.tagName}\u241f${titleInput.className}\u241f${titleInput.getAttribute('style') || ''}`;
+        if (!themeByStyle.has(styleKey)) themeByStyle.set(styleKey, readBadgeThemeColor(entry));
+        applyBadgeThemeColor(entry, badge, themeByStyle.get(styleKey));
     }
 }
 
-function syncMobileEntryStateBadge(entry) {
+function syncMobileEntryStateBadge(entry, syncTheme = true) {
     if (!entry) return;
     const shell = entry.querySelector('.slb-entry-header-shell');
     if (!shell) return;
@@ -396,7 +416,7 @@ function syncMobileEntryStateBadge(entry) {
         if (child instanceof Element && child.id === 'slb-strategy-picker') continue;
         child.remove();
     }
-    applyBadgeThemeColor(entry, badge);
+    if (syncTheme) applyBadgeThemeColor(entry, badge);
     badge.title = (value === 'constant'
         ? '상시 주입'
         : value === 'vectorized'
@@ -563,7 +583,7 @@ function scheduleMobileEntryStateBadgeRepair(entry) {
     requestAnimationFrame(() => repairMobileEntryStateBadge(entry));
 }
 
-function applyMobileDisplaySettings() {
+function applyMobileDisplaySettings(syncEntries = true) {
     const worldInfo = document.getElementById('WorldInfo');
     if (!worldInfo) return;
     const settings = getSettings();
@@ -573,10 +593,12 @@ function applyMobileDisplaySettings() {
     worldInfo.classList.toggle('slb-mobile-entry-state-enabled', settings.showMobileEntryState);
     worldInfo.classList.toggle('slb-mobile-token-summary-hidden', !settings.showMobileTokenSummary);
     worldInfo.classList.toggle('slb-mobile-entry-filters-hidden', !settings.showMobileEntryFilters);
-    // 이 전체 동기화는 단순 표시용 반복이 아니다. ST가 주입 방식 저장 중
-    // select/header 일부를 다시 그린 뒤에도 제목 옆 배지를 새 네이티브
-    // select와 다시 연결하는 모바일 안정화 단계이므로 생략하지 않는다.
-    renderedEntries().forEach(syncMobileEntryStateBadge);
+    if (!syncEntries) return;
+    // 사용자 표시 설정 변경과 반응형 전환에서는 전체 배지를 복구한다.
+    // 색상 계산은 항목마다 강제로 하지 않고 같은 테마끼리 한 번만 읽는다.
+    const entries = renderedEntries();
+    entries.forEach(entry => syncMobileEntryStateBadge(entry, false));
+    refreshBadgeThemeColors(entries);
 }
 
 function notify(message, type = 'info') {
@@ -3296,7 +3318,8 @@ function createAIBar() {
         }
     });
     syncQuickTranslationOptionsPlacement();
-    applyMobileDisplaySettings();
+    // 헤더가 아직 없는 첫 생성 단계에서는 표시 클래스만 갱신한다.
+    applyMobileDisplaySettings(false);
     renderBackupList();
 }
 
@@ -3549,6 +3572,8 @@ function unbindWorkspaceEntries() {
     state.observer?.disconnect();
     state.observer = null;
     state.responsiveObserver?.disconnect();
+    state.responsiveObserverTarget = null;
+    state.responsiveObservedWidth = 0;
     state.workspace = null;
 }
 
@@ -3742,7 +3767,8 @@ function createWorkspace() {
     bindWorkspacePopupObserver(popup);
     syncQuickTranslationOptionsPlacement();
     syncFilterButtons();
-    applyMobileDisplaySettings();
+    // 각 새 헤더가 자기 배지를 연결하므로 여기서 전체 목록을 다시 훑지 않는다.
+    applyMobileDisplaySettings(false);
 }
 
 function installEntryStateFilter() {
@@ -3802,13 +3828,17 @@ function syncEntryHeaderActions(entry) {
 function observeResponsiveHeader(entry) {
     if (!state.responsiveObserver || !entry) return;
     if (state.responsiveMedia?.matches || window.matchMedia('(max-width: 760px)').matches) return;
-    for (const element of [
-        entry.querySelector('.slb-entry-header-shell'),
-        entry.querySelector('.slb-header-toggles'),
-        entry.querySelector('.slb-header-actions'),
-    ]) {
-        if (element) state.responsiveObserver.observe(element);
-    }
+    // 항목마다 세 요소를 관찰하면 100개 로어북에서 첫 렌더 직전 수백 개의
+    // ResizeObserver 레코드와 레이아웃 재측정이 발생한다. 모든 행의 가용 폭은
+    // 목록 폭을 기준으로 바뀌고, 버튼 추가 경로는 별도로 재배치를 예약하므로
+    // 목록 하나만 관찰해 같은 반응형 동작을 유지한다.
+    const target = entry.closest('#world_popup_entries_list')
+        || document.getElementById('world_popup_entries_list');
+    if (!target || state.responsiveObserverTarget === target) return;
+    state.responsiveObserver.disconnect();
+    state.responsiveObserverTarget = target;
+    state.responsiveObservedWidth = target.getBoundingClientRect?.().width || target.clientWidth || 0;
+    state.responsiveObserver.observe(target);
 }
 
 function queryCompatible(root, selectors) {
@@ -3918,8 +3948,12 @@ function restoreNativeDragHandle(header, toggles) {
     return handle;
 }
 
-function enhanceEntryHeader(entry) {
+function enhanceEntryHeader(entry, options = {}) {
     if (!entry) return;
+    const initialCompact = typeof options?.initialCompact === 'boolean'
+        ? options.initialCompact
+        : null;
+    const deferBadgeTheme = Boolean(options?.deferBadgeTheme);
     bindEntryDrawerLifecycle(entry);
     // 버전 문자열이 달라도(업데이트 직후, 과거 중복 설치 잔재) 구조가
     // 온전하면 재사용한다. 완성된 헤더를 버전 불일치만으로 해체하면
@@ -3933,8 +3967,9 @@ function enhanceEntryHeader(entry) {
             entry.dataset.slbHeaderEnhanced = VERSION;
             restoreNativeDragHandle(entry.querySelector('.slb-entry-header'), existingShell.querySelector('.slb-header-toggles'));
             syncEntryHeaderActions(entry);
-            syncMobileEntryStateBadge(entry);
+            syncMobileEntryStateBadge(entry, !deferBadgeTheme);
             observeResponsiveHeader(entry);
+            if (initialCompact !== null) placeInitialHeaderFields(entry, initialCompact, existingResponsiveFields);
             return;
         }
         if (existingShell && existingGrid && existingTitle && existingResponsiveFields.length < 5) {
@@ -4062,9 +4097,13 @@ function enhanceEntryHeader(entry) {
 
     entry.dataset.slbHeaderEnhanced = VERSION;
     syncEntryHeaderActions(entry);
-    syncMobileEntryStateBadge(entry);
+    syncMobileEntryStateBadge(entry, !deferBadgeTheme);
     observeResponsiveHeader(entry);
-    placeResponsiveHeaderFields(entry);
+    if (initialCompact !== null) {
+        placeInitialHeaderFields(entry, initialCompact, [strategyField, positionField, depthField, orderField, triggerField]);
+    } else {
+        placeResponsiveHeaderFields(entry);
+    }
 }
 
 function entryData(uid) {
@@ -4175,6 +4214,42 @@ function getResponsiveHeaderFields(entry) {
         Array.from(entry.querySelectorAll('.slb-order-field')).find(field => field.querySelector('input')),
         Array.from(entry.querySelectorAll('.slb-trigger-field')).find(field => field.querySelector('input')),
     ].filter(Boolean);
+}
+
+function placeInitialHeaderFields(entry, compact, knownFields = null) {
+    if (!entry) return;
+    const grid = entry.querySelector('.slb-header-grid');
+    const stash = entry.querySelector('.slb-deferred-header-fields');
+    const overview = entry.querySelector('.slb-activation-overview');
+    if (!grid || !stash) return;
+
+    // 이미 열려 있는 호출 조건 패널은 초기 목록 최적화 대상이 아니다.
+    // 이 경우에는 검증된 안정화 경로를 그대로 사용해 첫째 줄을 보존한다.
+    const activationPanel = overview?.closest('.slb-panel[data-panel="activation"]');
+    if (activationPanel?.classList.contains('is-active')) {
+        placeResponsiveHeaderFields(entry, compact);
+        return;
+    }
+
+    const fields = Array.isArray(knownFields)
+        ? knownFields.filter(Boolean)
+        : getResponsiveHeaderFields(entry);
+    if (fields.length !== 5) {
+        scheduleNativeHeaderRecovery(entry);
+        return;
+    }
+
+    // 새로 렌더된 접힌 행은 호출 조건 패널이 아직 없으므로 픽셀 측정이나
+    // drawer 상태 판독 없이 결정적으로 배치할 수 있다. 이후 탭/상태 변경은
+    // placeResponsiveHeaderFields의 기존 보존 로직만 사용한다.
+    const target = compact ? stash : grid;
+    if (fields.some(field => field.parentElement !== target)) target.append(...fields);
+    entry.classList.toggle('slb-compact-entry', compact);
+    grid.classList.toggle('slb-header-title-only', compact);
+    if (overview) {
+        overview.hidden = true;
+        overview.dataset.slbVisible = 'false';
+    }
 }
 
 function getEntryDrawer(entry) {
@@ -4442,6 +4517,32 @@ function scheduleResponsiveEntryLayouts() {
     state.responsiveRaf = requestAnimationFrame(() => {
         state.responsiveRaf = 0;
         syncResponsiveEntryLayouts();
+    });
+}
+
+function scheduleInitialResponsiveGroupValidation(book, entries) {
+    if (state.responsiveMedia?.matches || window.matchMedia('(max-width: 760px)').matches) return;
+    requestAnimationFrame(() => {
+        if (currentBookName() !== book) return;
+        const liveList = document.getElementById('world_popup_entries_list');
+        if (!liveList || entries.some(entry => !entry.isConnected || !liveList.contains(entry))) return;
+
+        // 로딩 마스크가 display:none인 동안에는 개별 shell 폭이 0일 수 있다.
+        // 공개된 다음 각 Foldy 컨테이너의 대표 행 하나만 실제 측정하고, 결과가
+        // 달라진 컨테이너에만 측정 없는 배치를 적용한다.
+        const groups = new Map();
+        for (const entry of entries) {
+            const container = entry.parentElement;
+            if (!groups.has(container)) groups.set(container, []);
+            groups.get(container).push(entry);
+        }
+        for (const groupEntries of groups.values()) {
+            const representative = groupEntries[0];
+            if (!representative?.isConnected) continue;
+            const compact = shouldUseCompactHeader(representative);
+            if (groupEntries.every(entry => entry.classList.contains('slb-compact-entry') === compact)) continue;
+            for (const entry of groupEntries) placeInitialHeaderFields(entry, compact);
+        }
     });
 }
 
@@ -6056,7 +6157,7 @@ function isEntryHeaderReadyForReveal(entry) {
     return Boolean(shell && grid && titleControl && stateControl && actions);
 }
 
-function revealCompletedEntryList(book, entries) {
+function revealCompletedEntryList(book, entries, headersVerified = false) {
     if (currentBookName() !== book) return false;
     const list = document.getElementById('world_popup_entries_list');
     if (!entries.length && !list?.querySelector('#WIEntryHeaderTitlesPC')) return false;
@@ -6066,7 +6167,7 @@ function revealCompletedEntryList(book, entries) {
     if (
         state.enhancePending
         || !sameRenderedPage
-        || entries.some(entry => !isEntryHeaderReadyForReveal(entry))
+        || (!headersVerified && entries.some(entry => !isEntryHeaderReadyForReveal(entry)))
     ) return false;
 
     // 제목·주입 방식·작업 버튼까지만 완성되면 목록을 즉시 공개한다.
@@ -6104,6 +6205,11 @@ function enhanceAll() {
     const entries = renderedEntries();
     const bookAtStart = currentBookName();
     const runId = ++state.enhanceRunId;
+    // 책 전환으로 들어온 완전한 네이티브 목록에만 빠른 초기 배치를 쓴다.
+    // 이미 관리 중인 행이 하나라도 있으면 상태 저장/폴더 이동 중일 수 있으므로
+    // 기존의 보수적인 전체 복구 경로를 그대로 유지한다.
+    const freshHeaderPass = entries.length > 0
+        && entries.every(entry => !entry.dataset.slbHeaderEnhanced);
     // 좁은 화면 여부를 항목마다 다시 측정하지 않고 현재 목록에서 한 번만
     // 결정한다. 헤더 묶음도 조금 크게 처리해 긴 로어북에서 여러 렌더 프레임을
     // 기다리는 시간을 줄이되, 시간 예산을 넘으면 즉시 다음 프레임에 양보한다.
@@ -6112,17 +6218,23 @@ function enhanceAll() {
     const batchBudgetMs = narrowLayout ? 48 : 60;
     state.enhancing = true;
     let listRevealed = false;
+    let freshHeadersVerified = freshHeaderPass;
 
     const finish = () => {
         if (runId !== state.enhanceRunId) return;
         state.enhancing = false;
         state.enhanceChunkRaf = 0;
 
-        // ST가 저장 중 헤더 일부를 교체할 수 있으므로 마지막 전체 복구 패스는
-        // 항상 유지한다. 데이터 중복 요청 제거와 큰 렌더 묶음 최적화는 그대로라
-        // 첫 로딩 속도를 크게 되돌리지 않으면서 모바일 필드 보존을 보장한다.
-        syncResponsiveEntryLayouts();
-        applyMobileDisplaySettings();
+        if (freshHeaderPass) {
+            // 새 행은 헤더 루프에서 다섯 필드와 배지를 모두 검증했다. 같은
+            // 100개를 다시 두 번 측정하지 않고 표시 클래스만 확정한다.
+            applyMobileDisplaySettings(false);
+        } else {
+            // 상태 저장, 부분 DOM 교체, 폴더 이동 경로는 기존 복구 패스를
+            // 그대로 유지해 모바일 호출 조건 첫째 줄 보호를 약화시키지 않는다.
+            syncResponsiveEntryLayouts();
+            applyMobileDisplaySettings();
+        }
         syncFilterButtons();
         syncAutoControls();
         // The editor can render its selected lorebook after this extension's first
@@ -6143,11 +6255,15 @@ function enhanceAll() {
             scheduleEnhance();
         }
         if (!needsAnotherEnhancePass && !listRevealed) {
-            revealCompletedEntryList(bookAtStart, entries);
+            listRevealed = revealCompletedEntryList(bookAtStart, entries, freshHeadersVerified);
+            if (listRevealed && freshHeaderPass && !narrowLayout) {
+                scheduleInitialResponsiveGroupValidation(bookAtStart, entries);
+            }
         }
     };
 
     const openedEntries = [];
+    const compactByContainer = new Map();
     const enhanceEditorBatch = start => {
         if (runId !== state.enhanceRunId) return;
         if (currentBookName() !== bookAtStart) {
@@ -6191,8 +6307,37 @@ function enhanceAll() {
         for (; index < hardEnd; index++) {
             const entry = entries[index];
             if (!entry?.isConnected) continue;
-            enhanceEntryHeader(entry);
-            if (isEntryEditorRendered(entry)) openedEntries.push(entry);
+            if (freshHeaderPass) {
+                if (narrowLayout) {
+                    enhanceEntryHeader(entry, { initialCompact: true, deferBadgeTheme: true });
+                } else {
+                    // 같은 Foldy 컨테이너의 행은 가용 폭이 같다. 컨테이너 첫
+                    // 행만 실제 폭을 재고 나머지는 그 결과를 재사용한다.
+                    const container = entry.parentElement;
+                    if (compactByContainer.has(container)) {
+                        enhanceEntryHeader(entry, {
+                            initialCompact: compactByContainer.get(container),
+                            deferBadgeTheme: true,
+                        });
+                    } else {
+                        enhanceEntryHeader(entry, { deferBadgeTheme: true });
+                        compactByContainer.set(container, entry.classList.contains('slb-compact-entry'));
+                    }
+                }
+            } else {
+                enhanceEntryHeader(entry);
+            }
+            if (freshHeaderPass && entry.dataset.slbHeaderEnhanced !== VERSION) {
+                freshHeadersVerified = false;
+            }
+            // 접힌 행은 편집기 DOM 자체가 없으므로 getClientRects를 호출하지
+            // 않는다. 실제 편집기가 있는 소수의 열린 행만 렌더 여부를 확인한다.
+            const editor = queryCompatible(entry, [
+                '.world_entry_edit',
+                '.world-entry-edit',
+                '[data-role="entry-editor"]',
+            ]);
+            if (editor && isEntryEditorRendered(entry)) openedEntries.push(entry);
             if (index > start && performance.now() >= deadline) {
                 index += 1;
                 break;
@@ -6206,7 +6351,11 @@ function enhanceAll() {
         // 현재 페이지의 헤더가 모두 완성된 순간 먼저 공개한다. 브라우저가
         // 이 상태를 실제로 그릴 수 있도록 상세 편집기 변환은 다음 프레임부터
         // 수행한다.
-        listRevealed = revealCompletedEntryList(bookAtStart, entries);
+        if (freshHeaderPass) refreshBadgeThemeColors(entries);
+        listRevealed = revealCompletedEntryList(bookAtStart, entries, freshHeadersVerified);
+        if (listRevealed && freshHeaderPass && !narrowLayout) {
+            scheduleInitialResponsiveGroupValidation(bookAtStart, entries);
+        }
         if (!listRevealed && state.enhancePending) {
             finish();
             return;
@@ -6365,8 +6514,11 @@ function init() {
             // 모바일 레이아웃은 폭 임계값으로 고정된다. 각 항목의 크기 변화를
             // 다시 관찰하면 탭/상태 변경마다 전체 목록 배치가 반복된다.
             state.responsiveObserver?.disconnect();
+            state.responsiveObserverTarget = null;
+            state.responsiveObservedWidth = 0;
         } else {
-            renderedEntries().forEach(observeResponsiveHeader);
+            const firstEntry = renderedEntries()[0];
+            if (firstEntry) observeResponsiveHeader(firstEntry);
         }
         scheduleResponsiveEntryLayouts();
     };
@@ -6379,17 +6531,23 @@ function init() {
     if (typeof ResizeObserver === 'function') {
         state.responsiveObserver = new ResizeObserver(records => {
             if (state.responsiveMedia?.matches) return;
-            const changedEntries = new Set();
+            let widthChanged = false;
             for (const record of records) {
-                const entry = record.target?.closest?.('.world_entry');
-                if (entry?.isConnected) changedEntries.add(entry);
+                if (record.target !== state.responsiveObserverTarget) continue;
+                const width = record.contentRect?.width
+                    || record.target?.getBoundingClientRect?.().width
+                    || record.target?.clientWidth
+                    || 0;
+                if (width > 0 && Math.abs(width - state.responsiveObservedWidth) >= 1) {
+                    state.responsiveObservedWidth = width;
+                    widthChanged = true;
+                }
             }
-            // Set.forEach는 (값, 값)을 넘기므로 forceCompact가 요소(truthy)로
-            // 오염된다. 반드시 요소만 전달한다.
-            changedEntries.forEach(entry => placeResponsiveHeaderFields(entry));
+            if (widthChanged) scheduleResponsiveEntryLayouts();
         });
     }
-    applyMobileDisplaySettings();
+    // enhanceAll이 새 헤더마다 배지를 연결한다. 초기화 직전에는 클래스만 설정한다.
+    applyMobileDisplaySettings(false);
     if (isWorldInfoDrawerOpen() && currentBookName() && !hasCompleteVisibleEntryHeaders()) {
         beginWorldDrawerOpenLoading();
     }
