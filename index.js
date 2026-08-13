@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.27';
+const VERSION = '1.4.28';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -517,6 +517,69 @@ function getFoldyFolderDeleteButton(target) {
         : null;
 }
 
+function getFoldyFolderFromActionButton(button) {
+    const actions = button?.closest?.('.foldy-folder-actions');
+    const homeParent = actions?.__foldyHomeParent;
+    return actions?.closest?.('.foldy-lore-folder')
+        || homeParent?.closest?.('.foldy-lore-folder')
+        || null;
+}
+
+async function deleteFoldyLoreFolderOnly(deleteButton) {
+    const folderElement = getFoldyFolderFromActionButton(deleteButton);
+    const folderId = folderElement?.dataset?.foldyId;
+    const book = currentBookName();
+    const lorebookLayouts = extension_settings?.foldy?.layouts?.lorebooks;
+    if (!folderId || !book || !lorebookLayouts || typeof lorebookLayouts !== 'object') {
+        notify('폴더 정보를 찾지 못했습니다. 로어북을 새로고침한 뒤 다시 시도해주세요.', 'error');
+        return;
+    }
+
+    // Foldy의 현재 저장 키 형식은 JSON.stringify(['name', 로어북명])이며,
+    // 구버전의 name:로어북명 키도 함께 찾는다. DOM에 표시된 폴더 ID로
+    // 최종 대체 탐색하여 Foldy 버전 차이에도 실제 폴더 레이아웃만 수정한다.
+    const preferredOwners = [JSON.stringify(['name', book]), `name:${book}`];
+    let owner = preferredOwners.find(key => lorebookLayouts[key]?.folders?.some(folder => folder?.id === folderId));
+    if (!owner) {
+        owner = Object.keys(lorebookLayouts).find(key => lorebookLayouts[key]?.folders?.some(folder => folder?.id === folderId));
+    }
+    const layout = owner ? lorebookLayouts[owner] : null;
+    const folder = layout?.folders?.find(value => value?.id === folderId);
+    const rootIndex = layout?.root?.findIndex(node => node?.type === 'folder' && node?.id === folderId) ?? -1;
+    if (!folder || rootIndex < 0) {
+        notify('삭제할 폴더의 저장 정보를 찾지 못했습니다. 로어북을 새로고침한 뒤 다시 시도해주세요.', 'error');
+        return;
+    }
+
+    const folderName = String(folder.name || folderElement.querySelector('.foldy-folder-name')?.textContent || '이름 없는 폴더').trim();
+    const confirmed = window.confirm(`“${folderName}” 폴더만 삭제하고 안의 로어북 항목 ${folder.items?.length || 0}개를 최상위로 옮길까요?\n\n로어북 항목과 내용은 삭제되지 않습니다.`);
+    if (!confirmed) return;
+
+    const root = [...layout.root];
+    root.splice(rootIndex, 1, ...(folder.items || []).map(id => ({ type: 'item', id })));
+    lorebookLayouts[owner] = {
+        ...layout,
+        root,
+        folders: layout.folders.filter(value => value?.id !== folderId),
+    };
+
+    const collapsedLore = extension_settings?.foldy?.collapsed?.lore;
+    if (Array.isArray(collapsedLore?.[owner])) {
+        collapsedLore[owner] = collapsedLore[owner].filter(id => id !== folderId);
+        if (!collapsedLore[owner].length) delete collapsedLore[owner];
+    }
+
+    try {
+        await saveSettings();
+        state.foldyLoreLayoutPersistedSignature = getFoldyLoreLayoutSignature();
+        document.getElementById('world_refresh')?.click();
+        notify(`“${folderName}” 폴더를 삭제하고 내부 항목을 최상위로 옮겼습니다.`, 'success');
+    } catch (error) {
+        console.error('[로어북 매니저] Foldy 폴더만 삭제하는 작업에 실패했습니다.', error);
+        notify('폴더 변경 저장에 실패했습니다. 새로고침하지 말고 다시 시도해주세요.', 'error');
+    }
+}
+
 function lorebookEntryIndex(data) {
     const index = new Map();
     for (const [key, entry] of Object.entries(data?.entries || {})) {
@@ -606,84 +669,19 @@ function armFoldyFolderDeleteDrawerGuard(event) {
     const deleteButton = getFoldyFolderDeleteButton(event.target);
     if (!deleteButton) return;
 
-    // 어떤 테마/호환 확장이 폴더 삭제 버튼에 네이티브 엔트리 삭제 클래스를
-    // 잘못 복사해도 Foldy의 폴더 삭제 클릭이 항목 삭제 처리기로 들어가지 않게 한다.
+    // 이미 연결된 네이티브 삭제 리스너는 class 제거만으로 해제되지 않는다.
+    // 캡처 단계에서 이벤트가 해당 버튼에 도달하지 못하게 막고, 클릭 시에는
+    // 위의 폴더 전용 삭제 경로만 실행한다.
     deleteButton.classList.remove('delete_entry_button');
 
-    const book = currentBookName();
-    const safetyRunId = ++state.foldyDeleteSafetyRunId;
-    const safetySnapshot = foldyFolderDeleteSnapshotPromise(book);
-    const layoutSignatureBeforeDelete = getFoldyLoreLayoutSignature();
-    const drawerWasOpen = isWorldInfoDrawerOpen();
+    if (event.type === 'pointerdown') {
+        event.stopImmediatePropagation();
+        return;
+    }
 
-    clearTimeout(state.foldyDeleteGuardTimer);
-    const runId = ++state.foldyDeleteGuardRunId;
-    const panel = document.getElementById('WorldInfo');
-    const scrollTop = panel?.scrollTop ?? 0;
-    const startedAt = Date.now();
-    let confirmationSeen = false;
-    let confirmationClosedAt = 0;
-    let restorePendingUntil = 0;
-
-    const finish = () => {
-        if (runId !== state.foldyDeleteGuardRunId) return;
-        clearTimeout(state.foldyDeleteGuardTimer);
-        state.foldyDeleteGuardTimer = null;
-    };
-
-    const protect = () => {
-        if (runId !== state.foldyDeleteGuardRunId) return;
-        const now = Date.now();
-        if (currentBookName() !== book || now - startedAt > 60000) {
-            finish();
-            return;
-        }
-
-        const confirmationOpen = isFoldyDeleteConfirmationOpen();
-        if (confirmationOpen) confirmationSeen = true;
-        if (confirmationSeen && !confirmationOpen && !confirmationClosedAt) {
-            confirmationClosedAt = now;
-            // 확인창이 닫힌 뒤 Foldy와 SillyTavern의 비동기 저장이 끝날 시간을
-            // 준 다음 실제 데이터 UID를 비교한다. 취소했다면 차이가 없어 무동작한다.
-            setTimeout(async () => {
-                const snapshot = await safetySnapshot;
-                const restored = await restoreEntriesMissingAfterFoldyFolderDelete(book, snapshot, safetyRunId);
-                if (!restored
-                    && safetyRunId === state.foldyDeleteSafetyRunId
-                    && layoutSignatureBeforeDelete !== getFoldyLoreLayoutSignature()) {
-                    // 실제 엔트리는 보존됐지만 Foldy의 폴더 해제 직후 목록 DOM이
-                    // 이전 페이지를 잠시 유지하는 경우가 있다. 데이터 재저장 없이
-                    // Foldy가 소유한 새로고침 버튼만 눌러 루트로 이동한 항목을 표시한다.
-                    document.getElementById('world_refresh')?.click();
-                }
-            }, 700);
-        }
-
-        const waitingForConfirmation = !confirmationSeen && now - startedAt < 1500;
-        const afterConfirmation = Boolean(confirmationClosedAt && now - confirmationClosedAt < 3000);
-        const protectionActive = confirmationOpen || waitingForConfirmation || afterConfirmation;
-
-        if (drawerWasOpen && protectionActive && !isWorldInfoDrawerOpen() && now >= restorePendingUntil) {
-            const toggle = document.querySelector('#WI-SP-button > .drawer-toggle');
-            if (toggle) {
-                restorePendingUntil = now + 500;
-                toggle.click();
-                requestAnimationFrame(() => {
-                    const currentPanel = document.getElementById('WorldInfo');
-                    if (currentPanel) currentPanel.scrollTop = scrollTop;
-                });
-            }
-        }
-
-        if ((!confirmationSeen && !waitingForConfirmation)
-            || (confirmationClosedAt && !afterConfirmation)) {
-            finish();
-            return;
-        }
-        state.foldyDeleteGuardTimer = setTimeout(protect, 100);
-    };
-
-    state.foldyDeleteGuardTimer = setTimeout(protect, 0);
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    void deleteFoldyLoreFolderOnly(deleteButton);
 }
 
 function getUid(entry) {
