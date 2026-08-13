@@ -4213,6 +4213,7 @@
 /* v1.4.53 — two isolated manager engines with a CSS-only standard boundary. */
 .slb-manager-mode-settings {
     display: grid;
+    container-type: inline-size;
     gap: 6px;
     margin-top: 10px;
     padding: 10px 12px;
@@ -4287,8 +4288,26 @@
 
 .slb-manager-mode-choice > span {
     min-width: 0;
-    line-height: 1.25;
-    overflow-wrap: anywhere;
+    font-size: clamp(9px, 2.5vw, 14px);
+    font-size: clamp(9px, 3.2cqi, 16px);
+    line-height: 1.15;
+    letter-spacing: -0.025em;
+    white-space: nowrap;
+    word-break: keep-all;
+    overflow-wrap: normal;
+}
+
+@container (max-width: 420px) {
+    .slb-manager-mode-choice {
+        grid-template-columns: 18px minmax(0, 1fr);
+        gap: 5px;
+        padding-inline: 6px;
+    }
+
+    .slb-manager-mode-choice > input[type='radio'] {
+        width: 18px;
+        height: 18px;
+    }
 }
 
 .slb-manager-mode-settings > small {
