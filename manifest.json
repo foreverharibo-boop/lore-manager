@@ -1,12 +1,12 @@
 {
-  "display_name": "로어북 매니저",
+  "display_name": "로어북 매니저 (Foldy 고속 실험판)",
   "loading_order": 22,
   "requires": [],
   "optional": [],
   "js": "index.js",
   "css": "style.css",
   "author": "foreverharibo-boop",
-  "version": "1.4.48",
+  "version": "1.4.50",
   "homePage": "",
   "auto_update": false,
   "hooks": {
