@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.44';
+const VERSION = '1.4.45';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -22,6 +22,7 @@ const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
 const ENTRY_SELECTOR = [
     '#world_popup_entries_list > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)',
     '#world_popup_entries_list .foldy-lore-items > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)',
+    '#world_popup_entries_list .foldy-folder-items > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)',
 ].join(', ');
 const FULL_HEADER_FIELDS_MIN_WIDTH = 580;
 const HEADER_LAYOUT_SAFETY_GAP = 24;
@@ -158,6 +159,21 @@ function clearFoldyFolderOperation(entries) {
     entries?.classList.remove('slb-foldy-folder-operation');
 }
 
+function hasFoldyRenderableDom(entries) {
+    if (!entries?.isConnected) return false;
+    const rows = renderedEntries().filter(entry => entries.contains(entry));
+    if (!rows.length) return Boolean(entries.querySelector('#WIEntryHeaderTitlesPC'));
+
+    // Foldy's pending class can outlive the actual DOM transaction by several
+    // seconds. The manager only needs the native controls it moves into its
+    // header; once every rendered row has these controls, it is safe to start.
+    return rows.every(entry => Boolean(
+        entry.querySelector('.inline-drawer-header, .world_entry_header, .world-entry-header, [data-role="entry-header"]')
+        && entry.querySelector('textarea[name="comment"], input[name="comment"], textarea[name="entryComment"], textarea.WIEntryTitle')
+        && entry.querySelector('select[name="entryStateSelector"], select[name="entryStatus"], select[name="entryState"], select.WIEntryStatusSelect, select.world_entry_state, select.entryStateSelector')
+    ));
+}
+
 function beginFoldyLayoutSettle(entries, folderOperation = false) {
     if (!entries?.isConnected) return;
 
@@ -169,20 +185,32 @@ function beginFoldyLayoutSettle(entries, folderOperation = false) {
     if (folderOperation || isFoldyFolderOperationActive()) {
         markFoldyFolderOperation(entries);
     }
+    // A new Foldy transaction invalidates a previous fast-ready decision.
+    // Manager-owned header mutations do not call this function again.
+    entries.classList.remove('slb-foldy-ready');
     entries.classList.add('slb-foldy-settling');
     if (state.foldyLayoutSettleRaf) cancelAnimationFrame(state.foldyLayoutSettleRaf);
     if (state.foldyLayoutSettleTimer) clearTimeout(state.foldyLayoutSettleTimer);
+    let stableReadyFrames = 0;
 
     const waitForFoldy = () => {
         state.foldyLayoutSettleRaf = 0;
         if (!entries.isConnected || document.getElementById('world_popup_entries_list') !== entries) {
+            entries.classList.remove('slb-foldy-ready');
             entries.classList.remove('slb-foldy-settling');
             clearFoldyFolderOperation(entries);
             return;
         }
         if (entries.classList.contains('foldy-lore-pending')) {
-            state.foldyLayoutSettleRaf = requestAnimationFrame(waitForFoldy);
-            return;
+            stableReadyFrames = hasFoldyRenderableDom(entries) ? stableReadyFrames + 1 : 0;
+            // Two unchanged paint opportunities are enough to ensure the
+            // fragment and its native header controls have landed. Do not
+            // wait for Foldy's long-lived bookkeeping marker after that.
+            if (stableReadyFrames < 2) {
+                state.foldyLayoutSettleRaf = requestAnimationFrame(waitForFoldy);
+                return;
+            }
+            entries.classList.add('slb-foldy-ready');
         }
 
         // Foldy removes its pending marker immediately after appending the
@@ -190,7 +218,9 @@ function beginFoldyLayoutSettle(entries, folderOperation = false) {
         // observer records without adding an arbitrary fixed delay.
         state.foldyLayoutSettleTimer = setTimeout(() => {
             state.foldyLayoutSettleTimer = null;
-            if (!entries.isConnected || entries.classList.contains('foldy-lore-pending')) {
+            const pendingStillBlocks = entries.classList.contains('foldy-lore-pending')
+                && !entries.classList.contains('slb-foldy-ready');
+            if (!entries.isConnected || pendingStillBlocks) {
                 beginFoldyLayoutSettle(entries);
                 return;
             }
@@ -768,28 +798,82 @@ function finishFoldyDrawerRestore(view) {
     setTimeout(() => restoreFoldyDrawerView(view), 420);
 }
 
+function getFoldyFolderFromActionButton(button) {
+    if (button?.__slbFoldyFolder?.isConnected) return button.__slbFoldyFolder;
+    if (button?.closest?.('.world_entry')) return null;
+
+    const directFolder = button?.closest?.('.foldy-lore-folder');
+    if (directFolder) return directFolder;
+
+    const actions = button?.closest?.([
+        '.foldy-folder-actions',
+        '.foldy-folder-controls',
+        '.foldy-folder-menu',
+        '[data-foldy-folder-actions]',
+    ].join(','));
+    const homeParent = actions?.__foldyHomeParent;
+    const homeFolder = homeParent?.closest?.('.foldy-lore-folder') || null;
+    if (homeFolder) return homeFolder;
+
+    const folderId = button?.dataset?.foldyId
+        || button?.dataset?.folderId
+        || actions?.dataset?.foldyId
+        || actions?.dataset?.folderId;
+    if (!folderId) return null;
+    return Array.from(document.querySelectorAll('#world_popup_entries_list .foldy-lore-folder'))
+        .find(folder => foldyIdsEqual(
+            folder.dataset.foldyId || folder.dataset.folderId || folder.getAttribute('data-folder-id'),
+            folderId,
+        )) || null;
+}
+
 function getFoldyFolderDeleteButton(target) {
     if (!(target instanceof Element)) return null;
-    const button = target.closest('.foldy-folder-actions .caution, .foldy-folder-actions [title="폴더 삭제"]');
-    if (!button) return null;
-
     const list = document.getElementById('world_popup_entries_list');
     if (!list?.classList.contains('foldy-lore-root')) return null;
 
-    const actions = button.closest('.foldy-folder-actions');
-    const homeParent = actions?.__foldyHomeParent;
-    return actions?.closest('.foldy-lore-folder')
-        || homeParent?.closest?.('.foldy-lore-folder')
-        ? button
-        : null;
+    // Mobile Foldy places actions in a portal menu; desktop Foldy renders the
+    // same trash action inline in the folder header. Resolve the actionable
+    // ancestor first instead of requiring the mobile-only actions wrapper.
+    const button = target.closest([
+        'button',
+        '[role="button"]',
+        '.menu_button',
+        '.caution',
+        '.foldy-folder-delete',
+        '.foldy-delete-folder',
+        '[data-foldy-action]',
+        '[data-action]',
+        '.fa-trash',
+        '.fa-trash-can',
+        '[class*="trash"]',
+    ].join(','));
+    if (!button || button.closest('.world_entry')) return null;
+
+    const folder = getFoldyFolderFromActionButton(button);
+    if (!folder) return null;
+    const descriptor = [
+        button.textContent,
+        button.getAttribute('title'),
+        button.getAttribute('aria-label'),
+        button.className,
+        button.dataset.action,
+        button.dataset.foldyAction,
+    ].filter(Boolean).join(' ').toLowerCase();
+    const explicitlyDeletesFolder = /폴더\s*삭제|delete[\s_-]*folder|remove[\s_-]*folder|folder[\s_-]*delete/.test(descriptor);
+    const trashSelector = '.fa-trash, .fa-trash-can, .fa-regular.fa-trash-can, [class*="trash"]';
+    const hasTrashIcon = Boolean(button.matches(`.caution, ${trashSelector}`) || button.querySelector(trashSelector));
+    if (!explicitlyDeletesFolder && !hasTrashIcon) return null;
+
+    button.__slbFoldyFolder = folder;
+    return button;
 }
 
-function getFoldyFolderFromActionButton(button) {
-    const actions = button?.closest?.('.foldy-folder-actions');
-    const homeParent = actions?.__foldyHomeParent;
-    return actions?.closest?.('.foldy-lore-folder')
-        || homeParent?.closest?.('.foldy-lore-folder')
-        || null;
+function getFoldyFolderId(folderElement) {
+    return folderElement?.dataset?.foldyId
+        || folderElement?.dataset?.folderId
+        || folderElement?.getAttribute?.('data-folder-id')
+        || '';
 }
 
 function closeFoldyFolderActionMenu(deleteButton) {
@@ -840,7 +924,7 @@ function refreshMovedFoldyEntries(entries) {
 
 async function deleteFoldyLoreFolderOnly(deleteButton, drawerView) {
     const folderElement = getFoldyFolderFromActionButton(deleteButton);
-    const folderId = folderElement?.dataset?.foldyId;
+    const folderId = getFoldyFolderId(folderElement);
     const book = currentBookName();
     const lorebookLayouts = extension_settings?.foldy?.layouts?.lorebooks;
     if (!folderId || !book || !lorebookLayouts || typeof lorebookLayouts !== 'object') {
@@ -3488,7 +3572,9 @@ function bindWorkspaceEntries(entries) {
         '.foldy-lore-entry-actions',
     ].join(',');
     state.observer = new MutationObserver(mutations => {
-        if (entries.classList.contains('foldy-lore-pending')) {
+        const foldyMutation = isFoldyLoreMutation(entries, mutations);
+        if (entries.classList.contains('foldy-lore-pending')
+            && (!entries.classList.contains('slb-foldy-ready') || foldyMutation)) {
             beginFoldyLayoutSettle(entries, isFoldyFolderOperationActive());
             state.navigatorDirty = true;
             return;
@@ -3500,7 +3586,6 @@ function bindWorkspaceEntries(entries) {
             state.navigatorDirty = true;
             return;
         }
-        const foldyMutation = isFoldyLoreMutation(entries, mutations);
         if (foldyMutation) {
             beginFoldyLayoutSettle(entries, isFoldyFolderOperationActive());
             void persistFoldyLoreLayoutIfChanged();
@@ -5754,8 +5839,10 @@ function scheduleInitialTokenSummary(data = null, delay = 180) {
                 || state.foldyRevealPending
                 || state.bookSwitch?.book === expectedBook
                 || document.getElementById('WorldInfo')?.classList.contains('slb-book-switching')
-                || entriesList?.classList.contains('foldy-lore-pending')
-                || entriesList?.classList.contains('slb-foldy-settling')
+                || (entriesList?.classList.contains('foldy-lore-pending')
+                    && !entriesList?.classList.contains('slb-foldy-ready'))
+                || (entriesList?.classList.contains('slb-foldy-settling')
+                    && !entriesList?.classList.contains('slb-foldy-ready'))
             );
             if (listStillPreparing) {
                 state.tokenTimer = setTimeout(run, 60);
@@ -5987,7 +6074,9 @@ function revealCompletedEntryList(book, entries) {
     // finish 단계에서 처리하므로 첫 화면 표시를 막지 않는다.
     if (state.foldyRevealPending) {
         const currentEntries = document.getElementById('world_popup_entries_list');
-        if (!currentEntries?.classList.contains('foldy-lore-pending')) {
+        const pendingStillBlocks = currentEntries?.classList.contains('foldy-lore-pending')
+            && !currentEntries?.classList.contains('slb-foldy-ready');
+        if (!pendingStillBlocks) {
             state.foldyRevealPending = false;
             currentEntries?.classList.remove('slb-foldy-settling');
             clearFoldyFolderOperation(currentEntries);
@@ -6002,7 +6091,8 @@ function revealCompletedEntryList(book, entries) {
 function enhanceAll() {
     if (state.sorting || state.enhancing) return;
     const liveEntryList = document.getElementById('world_popup_entries_list');
-    if (liveEntryList?.classList.contains('foldy-lore-pending')) {
+    if (liveEntryList?.classList.contains('foldy-lore-pending')
+        && !liveEntryList.classList.contains('slb-foldy-ready')) {
         beginFoldyLayoutSettle(liveEntryList);
         return;
     }

@@ -4223,8 +4223,8 @@
 
 /* v1.4.39 — Foldy 렌더 중에는 목록 자체를 마스킹한다. 자식 배지에 걸린
    visibility:visible !important가 부모 숨김을 뚫고 단독 노출되는 문제를 막는다. */
-#WorldInfo.slb-active #world_popup_entries_list.foldy-lore-pending,
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-settling {
+#WorldInfo.slb-active #world_popup_entries_list.foldy-lore-pending:not(.slb-foldy-ready),
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-settling:not(.slb-foldy-ready) {
     position: relative !important;
     box-sizing: border-box !important;
     height: 64px !important;
@@ -4234,13 +4234,13 @@
     pointer-events: none !important;
 }
 
-#WorldInfo.slb-active #world_popup_entries_list.foldy-lore-pending > *,
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-settling > * {
+#WorldInfo.slb-active #world_popup_entries_list.foldy-lore-pending:not(.slb-foldy-ready) > *,
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-settling:not(.slb-foldy-ready) > * {
     display: none !important;
 }
 
-#WorldInfo.slb-active #world_popup_entries_list.foldy-lore-pending::before,
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-settling::before {
+#WorldInfo.slb-active #world_popup_entries_list.foldy-lore-pending:not(.slb-foldy-ready)::before,
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-settling:not(.slb-foldy-ready)::before {
     /* Foldy also uses its pending class while it applies an already-saved
        layout during the first lorebook render. That is book loading, not a
        user folder operation. */
@@ -4255,14 +4255,14 @@
     opacity: 0.7;
 }
 
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending::before,
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling::before {
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending:not(.slb-foldy-ready)::before,
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling:not(.slb-foldy-ready)::before {
     content: '폴더를 정리 중입니다.';
 }
 
 /* 첫 열기/책 전환은 Foldy가 내부 레이아웃 값을 보정하더라도 로어북 준비가
    우선이다. 사용자가 실제 폴더 작업을 할 때는 book-switching이 없다. */
-#WorldInfo.slb-active.slb-book-switching #world_popup_entries_list.foldy-lore-pending::before,
-#WorldInfo.slb-active.slb-book-switching #world_popup_entries_list.slb-foldy-settling::before {
+#WorldInfo.slb-active.slb-book-switching #world_popup_entries_list.foldy-lore-pending:not(.slb-foldy-ready)::before,
+#WorldInfo.slb-active.slb-book-switching #world_popup_entries_list.slb-foldy-settling:not(.slb-foldy-ready)::before {
     content: '로어북을 준비 중입니다.';
 }
