@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.54';
+const VERSION = '1.4.55';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -137,6 +137,8 @@ const state = {
     responsiveObservedWidth: 0,
     responsiveRaf: 0,
     foldyLinkedActivationTimer: null,
+    foldyFolderDeleteDrawerGuard: null,
+    foldyFolderDeleteDrawerGuardTimer: null,
     settingsMigrationNeeded: false,
     googleTranslationQueue: Promise.resolve(),
 };
@@ -740,6 +742,7 @@ function applyManagerMode(requestedMode, {
             scheduleFoldyLinkedActivation();
         }
     } else {
+        clearFoldyFolderDeleteDrawerGuard();
         clearFoldyLinkedPreparing();
         // 연동 모드에서 나오는 경계, 또는 1.4.52가 남긴 내부 정렬값을
         // 처음 정리하는 경우에만 한 번 전환한다. 기존 모드 실행 중에는
@@ -767,6 +770,219 @@ function applyManagerMode(requestedMode, {
     }
     if (!initial) scheduleEnhance();
     return mode;
+}
+
+function captureFoldyFolderDeleteDrawerView() {
+    const panel = document.getElementById('WorldInfo');
+    return {
+        shouldStayOpen: Boolean(panel && isWorldInfoDrawerOpen()),
+        scrollTop: Number(panel?.scrollTop) || 0,
+    };
+}
+
+function restoreFoldyFolderDeleteDrawerView(view) {
+    if (!view?.shouldStayOpen || !isFoldyLinkedMode()) return;
+    const panel = document.getElementById('WorldInfo');
+    if (!panel) return;
+
+    const closed = panel.hidden
+        || panel.style.display === 'none'
+        || panel.style.height === '0px'
+        || panel.classList.contains('closedDrawer')
+        || !panel.classList.contains('openDrawer');
+    if (closed) {
+        panel.hidden = false;
+        if (panel.style.display === 'none') panel.style.removeProperty('display');
+        if (panel.style.height === '0px') panel.style.removeProperty('height');
+        panel.classList.remove('closedDrawer');
+        panel.classList.add('openDrawer');
+
+        const icon = document.getElementById('WIDrawerIcon');
+        icon?.classList.remove('closedIcon');
+        icon?.classList.add('openIcon');
+    }
+    if (panel.scrollTop !== view.scrollTop) panel.scrollTop = view.scrollTop;
+}
+
+function clearFoldyFolderDeleteDrawerGuard() {
+    const guard = state.foldyFolderDeleteDrawerGuard;
+    for (const timer of guard?.restoreTimers || []) clearTimeout(timer);
+    if (state.foldyFolderDeleteDrawerGuardTimer) {
+        clearTimeout(state.foldyFolderDeleteDrawerGuardTimer);
+    }
+    state.foldyFolderDeleteDrawerGuardTimer = null;
+    state.foldyFolderDeleteDrawerGuard = null;
+}
+
+function scheduleFoldyFolderDeleteDrawerRestore() {
+    const guard = state.foldyFolderDeleteDrawerGuard;
+    if (!guard || !isFoldyLinkedMode()) return;
+    for (const timer of guard.restoreTimers) clearTimeout(timer);
+    guard.restoreTimers = [];
+
+    const restore = () => {
+        if (state.foldyFolderDeleteDrawerGuard !== guard) return;
+        restoreFoldyFolderDeleteDrawerView(guard.view);
+    };
+    restore();
+    queueMicrotask(restore);
+    requestAnimationFrame(restore);
+    guard.restoreTimers.push(...[80, 220, 520].map(delay => setTimeout(restore, delay)));
+}
+
+function startFoldyFolderDeleteDrawerGuard(actions) {
+    if (!isFoldyLinkedMode()) return null;
+    const previous = state.foldyFolderDeleteDrawerGuard;
+    if (previous?.actions === actions) {
+        scheduleFoldyFolderDeleteDrawerRestore();
+        return previous;
+    }
+
+    clearFoldyFolderDeleteDrawerGuard();
+    const view = captureFoldyFolderDeleteDrawerView();
+    if (!view.shouldStayOpen) return null;
+    const guard = { actions, view, restoreTimers: [] };
+    state.foldyFolderDeleteDrawerGuard = guard;
+    // 확인창을 오래 열어둔 경우에도 일반 드로어 닫기를 영구히 막지 않는다.
+    state.foldyFolderDeleteDrawerGuardTimer = setTimeout(() => {
+        if (state.foldyFolderDeleteDrawerGuard === guard) clearFoldyFolderDeleteDrawerGuard();
+    }, 5 * 60 * 1000);
+    scheduleFoldyFolderDeleteDrawerRestore();
+    return guard;
+}
+
+function isFoldyLoreFolderActions(actions) {
+    if (!(actions instanceof Element) || !actions.classList.contains('foldy-folder-actions')) return false;
+    if (actions.__slbLoreFolderActions) return true;
+    const homeParent = actions.__foldyHomeParent;
+    const folder = actions.closest('#world_popup_entries_list .foldy-lore-folder')
+        || homeParent?.closest?.('#world_popup_entries_list .foldy-lore-folder');
+    if (!folder) return false;
+    actions.__slbLoreFolderActions = true;
+    return true;
+}
+
+function foldyLoreFolderDeleteAction(target) {
+    if (!(target instanceof Element) || !isFoldyLinkedMode()) return null;
+    const button = target.closest('button, [role="button"], .menu_button');
+    const actions = button?.closest('.foldy-folder-actions');
+    if (!button || !actions || button.closest('.world_entry')) return null;
+    const activeGuardOwnsActions = state.foldyFolderDeleteDrawerGuard?.actions === actions;
+    if (!activeGuardOwnsActions && !isFoldyLoreFolderActions(actions)) return null;
+
+    const descriptor = [
+        button.textContent,
+        button.getAttribute('title'),
+        button.getAttribute('aria-label'),
+        button.className,
+        button.dataset.action,
+        button.dataset.foldyAction,
+    ].filter(Boolean).join(' ').toLowerCase();
+    const explicitlyDeletesFolder = /폴더\s*삭제|delete[\s_-]*folder|remove[\s_-]*folder|folder[\s_-]*delete/.test(descriptor);
+    const hasTrashIcon = button.classList.contains('fa-trash')
+        || button.classList.contains('fa-trash-can')
+        || Boolean(button.querySelector('.fa-trash, .fa-trash-can, [class*="trash"]'));
+    if (!explicitlyDeletesFolder && !(button.classList.contains('caution') && hasTrashIcon)) return null;
+    return { button, actions };
+}
+
+function isFoldyDeleteConfirmationPopup(popup) {
+    return Boolean(
+        popup instanceof Element
+        && popup.matches('dialog.popup[open], .popup[open]')
+        && popup.querySelector('.foldy-confirm-message'),
+    );
+}
+
+function finishFoldyDeleteConfirmationInteraction(popup) {
+    scheduleFoldyFolderDeleteDrawerRestore();
+    setTimeout(() => {
+        const guard = state.foldyFolderDeleteDrawerGuard;
+        if (!guard) return;
+        restoreFoldyFolderDeleteDrawerView(guard.view);
+        if (!popup.isConnected || !popup.matches('[open]')) clearFoldyFolderDeleteDrawerGuard();
+    }, 650);
+}
+
+function bindFoldyDeleteConfirmationPopup() {
+    if (!state.foldyFolderDeleteDrawerGuard || !isFoldyLinkedMode()) return;
+    const popups = document.querySelectorAll('dialog.popup[open], .popup[open]');
+    for (const popup of popups) {
+        if (!isFoldyDeleteConfirmationPopup(popup) || popup.__slbFoldyDeleteDrawerGuardBound) continue;
+        popup.__slbFoldyDeleteDrawerGuardBound = true;
+        const protect = event => {
+            if (!state.foldyFolderDeleteDrawerGuard) return;
+            // Popup의 버튼/폼 리스너는 안쪽에서 먼저 정상 실행된다. 여기서는
+            // 그 뒤 document까지 올라가는 바깥 클릭만 끊는다.
+            event.stopPropagation();
+            scheduleFoldyFolderDeleteDrawerRestore();
+            if (event.type === 'click') finishFoldyDeleteConfirmationInteraction(popup);
+        };
+        popup.addEventListener('pointerdown', protect);
+        popup.addEventListener('touchstart', protect, { passive: true });
+        popup.addEventListener('mousedown', protect);
+        popup.addEventListener('click', protect);
+        popup.addEventListener('cancel', () => finishFoldyDeleteConfirmationInteraction(popup));
+        popup.addEventListener('close', () => finishFoldyDeleteConfirmationInteraction(popup));
+    }
+}
+
+function handleFoldyFolderDeleteActionBoundary(event) {
+    const action = foldyLoreFolderDeleteAction(event.target);
+    if (!action) return;
+    const alreadyGuarded = state.foldyFolderDeleteDrawerGuard?.actions === action.actions;
+    const isMobilePortal = action.actions.classList.contains('foldy-folder-actions-portal')
+        || Boolean(action.actions.__foldyHomeParent)
+        || alreadyGuarded;
+    if (!isMobilePortal) return;
+    const guard = startFoldyFolderDeleteDrawerGuard(action.actions);
+    if (!guard) return;
+    // Foldy의 버튼 리스너와 actions 메뉴 닫기 리스너는 이 지점보다 안쪽에서
+    // 이미 실행된다. document의 모바일 드로어 바깥 클릭까지만 차단한다.
+    event.stopPropagation();
+    scheduleFoldyFolderDeleteDrawerRestore();
+    if (event.type === 'click') {
+        queueMicrotask(bindFoldyDeleteConfirmationPopup);
+        requestAnimationFrame(bindFoldyDeleteConfirmationPopup);
+        setTimeout(bindFoldyDeleteConfirmationPopup, 80);
+    }
+}
+
+function bindFoldyFolderDeleteDrawerGuards(root = document) {
+    if (!isFoldyLinkedMode()) return;
+    const actionsList = root.matches?.('.foldy-folder-actions')
+        ? [root]
+        : Array.from(root.querySelectorAll?.('.foldy-lore-folder .foldy-folder-actions') || []);
+    for (const actions of actionsList) {
+        if (!isFoldyLoreFolderActions(actions) || actions.__slbFolderDeleteDrawerGuardBound) continue;
+        actions.__slbFolderDeleteDrawerGuardBound = true;
+        actions.addEventListener('pointerdown', handleFoldyFolderDeleteActionBoundary);
+        actions.addEventListener('touchstart', handleFoldyFolderDeleteActionBoundary, { passive: true });
+        actions.addEventListener('mousedown', handleFoldyFolderDeleteActionBoundary);
+        actions.addEventListener('click', handleFoldyFolderDeleteActionBoundary);
+    }
+}
+
+function primeFoldyFolderDeleteDrawerGuard(event) {
+    if (!isFoldyLinkedMode()) return;
+    const popup = event.target instanceof Element
+        ? event.target.closest('dialog.popup[open], .popup[open]')
+        : null;
+    if (state.foldyFolderDeleteDrawerGuard && isFoldyDeleteConfirmationPopup(popup)) {
+        bindFoldyDeleteConfirmationPopup();
+        scheduleFoldyFolderDeleteDrawerRestore();
+        return;
+    }
+
+    const action = foldyLoreFolderDeleteAction(event.target);
+    if (!action) return;
+    // 모바일 Foldy만 actions를 body 포털로 옮긴다. 데스크톱의 정상적인
+    // 드로어 내부 삭제 이벤트에는 아무 조치도 하지 않는다.
+    const isMobilePortal = action.actions.classList.contains('foldy-folder-actions-portal')
+        || Boolean(action.actions.__foldyHomeParent);
+    if (!isMobilePortal) return;
+    bindFoldyFolderDeleteDrawerGuards(action.actions);
+    startFoldyFolderDeleteDrawerGuard(action.actions);
 }
 
 function getUid(entry) {
@@ -3244,6 +3460,7 @@ function bindWorkspaceEntries(entries) {
     entries.addEventListener('input', handleWorkspaceEntryInput, true);
     entries.addEventListener('change', handleWorkspaceEntryInput, true);
     entries.addEventListener('click', handleWorkspaceEntryClick);
+    bindFoldyFolderDeleteDrawerGuards(entries);
 
     const nativeHeaderAdditions = [
         '.world_entry',
@@ -3287,6 +3504,7 @@ function bindWorkspaceEntries(entries) {
             // Foldy 원본이 목록을 비우고 폴더/행을 다시 붙이는 동안 제목 옆
             // 주입 방식만 먼저 비치지 않도록, 완성된 매니저 헤더까지 가린다.
             markFoldyLinkedPreparing();
+            bindFoldyFolderDeleteDrawerGuards(entries);
             state.navigatorDirty = true;
         }
         const bookSwitchChildMutation = Boolean(
@@ -6001,6 +6219,7 @@ function revealCompletedEntryList(book, entries, headersVerified = false) {
 function enhanceAll() {
     if (state.sorting || state.enhancing) return;
     const liveEntryList = document.getElementById('world_popup_entries_list');
+    bindFoldyFolderDeleteDrawerGuards(liveEntryList || document);
     if (isFoldyLinkedMode() && liveEntryList?.classList.contains('foldy-lore-pending')) {
         markFoldyLinkedPreparing();
         return;
@@ -6199,6 +6418,10 @@ function scheduleEnhance() {
 function bindEvents() {
     const worldSelect = document.getElementById('world_editor_select');
     const worldInfoDrawerToggle = document.querySelector('#WI-SP-button > .drawer-toggle');
+    window.addEventListener('pointerdown', primeFoldyFolderDeleteDrawerGuard, true);
+    window.addEventListener('touchstart', primeFoldyFolderDeleteDrawerGuard, { capture: true, passive: true });
+    window.addEventListener('mousedown', primeFoldyFolderDeleteDrawerGuard, true);
+    window.addEventListener('click', primeFoldyFolderDeleteDrawerGuard, true);
     worldInfoDrawerToggle?.addEventListener('pointerdown', () => {
         // SillyTavern의 클릭 핸들러가 드로어를 화면에 그리기 전 같은 입력
         // 이벤트에서 가림막을 먼저 준비해, 첫 프레임에 빈 행이 보이지 않게 한다.
