@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.30';
+const VERSION = '1.4.31';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -115,7 +115,6 @@ const state = {
     responsiveRaf: 0,
     foldyDeleteGuardTimer: null,
     foldyDeleteGuardStopTimer: null,
-    foldyDeleteGuardObserver: null,
     foldyDeleteGuardRunId: 0,
     foldyDeleteSafetyRunId: 0,
     foldyLoreLayoutPersistedSignature: '',
@@ -507,6 +506,13 @@ function forceWorldInfoDrawerOpen(scrollTop = null) {
     const panel = document.getElementById('WorldInfo');
     if (!panel) return false;
 
+    // 이미 정상적으로 열려 있으면 DOM 속성을 단 한 번도 다시 쓰지 않는다.
+    // 클래스 변경 감시와 복구가 서로를 호출하는 반복을 원천 차단한다.
+    if (isWorldInfoDrawerOpen()
+        && !panel.hidden
+        && panel.style.display !== 'none'
+        && panel.style.height !== '0px') return true;
+
     // Foldy의 포털 메뉴를 닫는 클릭이 일부 테마에서 월드 인포의 바깥
     // 클릭으로도 처리된다. 이 경로에서는 토글을 다시 클릭하지 않고
     // SillyTavern 드로어의 실제 상태 클래스만 열림으로 되돌린다. 토글
@@ -538,24 +544,16 @@ function beginFoldyFolderDeleteDrawerLease() {
     const scrollTop = panel.scrollTop;
     clearInterval(state.foldyDeleteGuardTimer);
     clearTimeout(state.foldyDeleteGuardStopTimer);
-    state.foldyDeleteGuardObserver?.disconnect();
 
     const enforce = () => {
         if (runId !== state.foldyDeleteGuardRunId) return;
-        forceWorldInfoDrawerOpen(scrollTop);
+        if (!isWorldInfoDrawerOpen()) forceWorldInfoDrawerOpen(scrollTop);
     };
 
-    // pointerdown 직후부터 폴더 저장과 DOM 이동이 끝날 때까지만 보호한다.
-    // MutationObserver는 닫힘 클래스가 붙는 순간을 잡고, 짧은 interval은
-    // 테마가 노드를 다시 꾸미거나 지연 타이머로 닫는 경우를 보완한다.
-    enforce();
-    const observer = new MutationObserver(enforce);
-    observer.observe(panel, {
-        attributes: true,
-        attributeFilter: ['class', 'style', 'hidden'],
-    });
-    state.foldyDeleteGuardObserver = observer;
-    state.foldyDeleteGuardTimer = setInterval(enforce, 80);
+    // DOM 변경 감시는 복구 작업 자체를 다시 감지할 수 있으므로 사용하지
+    // 않는다. 삭제 작업 중에만 저빈도 확인을 수행하고, 실제로 닫혔을
+    // 때에만 한 번 복구한다.
+    state.foldyDeleteGuardTimer = setInterval(enforce, 160);
     state.foldyDeleteGuardStopTimer = setTimeout(() => endFoldyFolderDeleteDrawerLease(runId, 0), 10000);
     return runId;
 }
@@ -565,11 +563,9 @@ function endFoldyFolderDeleteDrawerLease(runId, delay = 900) {
     clearTimeout(state.foldyDeleteGuardStopTimer);
     state.foldyDeleteGuardStopTimer = setTimeout(() => {
         if (runId !== state.foldyDeleteGuardRunId) return;
-        forceWorldInfoDrawerOpen();
+        if (!isWorldInfoDrawerOpen()) forceWorldInfoDrawerOpen();
         clearInterval(state.foldyDeleteGuardTimer);
         state.foldyDeleteGuardTimer = null;
-        state.foldyDeleteGuardObserver?.disconnect();
-        state.foldyDeleteGuardObserver = null;
         state.foldyDeleteGuardStopTimer = null;
     }, Math.max(0, delay));
 }
