@@ -4260,6 +4260,48 @@
     content: '폴더를 정리 중입니다.';
 }
 
+/* 폴더 삭제가 시작된 첫 프레임에는 이전 Foldy 렌더의 ready 표식이 아직
+   남을 수 있다. 폴더 작업 중에는 ready 여부와 무관하게 목록을 한 덩어리로
+   가려 모바일 주입 방식 배지만 먼저 비치는 순간을 없앤다. */
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending,
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling {
+    position: relative !important;
+    box-sizing: border-box !important;
+    height: 64px !important;
+    min-height: 64px !important;
+    max-height: 64px !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+}
+
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending > *,
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling > * {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
+
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending .slb-mobile-entry-state-badge,
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling .slb-mobile-entry-state-badge {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
+
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending::before,
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling::before {
+    content: '폴더를 정리 중입니다.';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    visibility: visible !important;
+    color: var(--SmartThemeBodyColor, inherit);
+    font-size: 0.9em;
+    opacity: 0.7;
+}
+
 /* 첫 열기/책 전환은 Foldy가 내부 레이아웃 값을 보정하더라도 로어북 준비가
    우선이다. 사용자가 실제 폴더 작업을 할 때는 book-switching이 없다. */
 #WorldInfo.slb-active.slb-book-switching #world_popup_entries_list.foldy-lore-pending:not(.slb-foldy-ready)::before,

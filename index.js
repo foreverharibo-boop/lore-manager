@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.47';
+const VERSION = '1.4.48';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -371,7 +371,7 @@ function beginFoldyLayoutSettle(entries, folderOperation = false) {
 }
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-4-7';
+    const styleId = 'slb-critical-layout-1-4-8';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -399,6 +399,7 @@ function ensureCriticalLayoutStyles() {
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell,#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 28px auto!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge,#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge{width:28px!important;min-width:28px!important;max-width:28px!important;height:29px!important;align-self:center!important}#WorldInfo.slb-active .slb-mobile-entry-state-badge{position:relative}#WorldInfo.slb-active .slb-mobile-entry-state-badge:after{content:"";position:absolute;inset:3px 1px;border:1px solid var(--SmartThemeBorderColor,rgba(128,128,128,.55));border-radius:7px;pointer-events:none}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell,#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 38px auto!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge,#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge{width:38px!important;min-width:38px!important;max-width:38px!important;height:29px!important;min-height:29px!important;max-height:29px!important;align-self:center!important;background:#fff!important;border:1px solid var(--SmartThemeBorderColor,rgba(128,96,96,.6))!important;border-radius:9px!important}#WorldInfo.slb-active .slb-mobile-entry-state-badge:after{content:none!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge:before{width:14px!important;height:14px!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="vectorized"]:before{width:auto!important;height:auto!important;font-size:15px!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-strategy-field select{text-align:center!important;text-align-last:center!important;font-size:19px!important;line-height:1!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-position-field select{font-size:15px!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input{font-size:16px!important;text-align:center!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge,#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge{background:transparent!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-strategy-field select{font-size:15px!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-position-field select{font-size:14px!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input{font-size:14px!important;text-align:center!important;padding:0 2px!important;line-height:normal!important}
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending .slb-mobile-entry-state-badge,#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling .slb-mobile-entry-state-badge{display:none!important;visibility:hidden!important;opacity:0!important}
 #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-strategy-field select{font-size:13px!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-position-field select,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input{font-size:13px!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input{-webkit-appearance:textfield!important;appearance:textfield!important;-moz-appearance:textfield!important;text-align:center!important;padding:0!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input::-webkit-outer-spin-button,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input::-webkit-inner-spin-button,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input::-webkit-outer-spin-button,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input::-webkit-inner-spin-button,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input::-webkit-outer-spin-button,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input::-webkit-inner-spin-button{-webkit-appearance:none!important;appearance:none!important;margin:0!important}
 #WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field select,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-header-field input{box-sizing:border-box!important;height:42px!important;min-height:42px!important;max-height:42px!important;padding:0!important;margin:0!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-strategy-field select{font-size:13px!important;text-align:center!important;text-align-last:center!important;line-height:normal!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-position-field select{font-size:13px!important;padding:0 4px!important}#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-depth-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-order-field input,#WorldInfo.slb-active .world_entry .slb-activation-overview .slb-trigger-field input{font-size:13px!important;line-height:42px!important;text-align:center!important}
 @media(min-width:761px){
@@ -1281,7 +1282,12 @@ async function deleteFoldyLoreFolderOnly(deleteButton, drawerView) {
         return;
     }
     const targetSignature = getFoldyLoreLayoutSignature();
-    markFoldyFolderOperation(undefined, 10000);
+    const entriesList = document.getElementById('world_popup_entries_list');
+    markFoldyFolderOperation(entriesList, 10000);
+    // 이전 렌더의 slb-foldy-ready가 남은 채 Foldy가 행을 옮기기 시작하면
+    // 강한 모바일 배지 규칙만 한 프레임 먼저 보일 수 있다. 실제 DOM 변경
+    // 전에 ready를 무효화하고 목록 전체 가림막을 동기적으로 시작한다.
+    beginFoldyLayoutSettle(entriesList, true);
 
     try {
         // 메모리 변경 직후 서버 설정 저장을 먼저 시작한다. DOM 정리와 동시에
@@ -1304,7 +1310,12 @@ async function deleteFoldyLoreFolderOnly(deleteButton, drawerView) {
         // Foldy에 삭제 전 구조를 저장하는 예약 작업이 남아 있어도 같은 ID의
         // 폴더만 다시 제거·저장한다. 새 폴더나 이후 항목 이동은 보존한다.
         scheduleDeletedFoldyFolderPersistenceCheck(owner, folderId);
-        clearFoldyFolderOperation(document.getElementById('world_popup_entries_list'));
+        // 두 안정 프레임과 항목 헤더 정리가 끝나기 전에는 폴더 작업 클래스를
+        // 유지한다. 너무 빠른 설정 응답 때문에 안내가 로어북 준비 문구로
+        // 바뀌거나 배지만 먼저 드러나는 마지막 한 프레임까지 막는다.
+        if (!entriesList?.classList.contains('slb-foldy-settling')) {
+            clearFoldyFolderOperation(entriesList);
+        }
         notify(`“${folderName}” 폴더를 삭제하고 내부 항목을 최상위로 옮겼습니다.`, 'success');
     } catch (error) {
         if (Array.isArray(layout.root)) layout.root.splice(0, layout.root.length, ...previousRoot);
