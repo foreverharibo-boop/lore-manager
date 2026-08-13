@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.32';
+const VERSION = '1.4.33';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -493,6 +493,48 @@ function isFoldyLoreMutation(entries, mutations) {
     });
 }
 
+function captureFoldyDrawerView() {
+    const panel = document.getElementById('WorldInfo');
+    return {
+        shouldStayOpen: Boolean(panel),
+        scrollTop: Number(panel?.scrollTop) || 0,
+    };
+}
+
+function restoreFoldyDrawerView(view) {
+    if (!view?.shouldStayOpen) return;
+    const panel = document.getElementById('WorldInfo');
+    if (!panel) return;
+
+    const closed = panel.hidden
+        || panel.style.display === 'none'
+        || panel.style.height === '0px'
+        || panel.classList.contains('closedDrawer')
+        || !panel.classList.contains('openDrawer');
+    if (closed) {
+        if (panel.hidden) panel.hidden = false;
+        if (panel.style.display === 'none') panel.style.removeProperty('display');
+        if (panel.style.height === '0px') panel.style.removeProperty('height');
+        panel.classList.remove('closedDrawer');
+        panel.classList.add('openDrawer');
+
+        const icon = document.getElementById('WIDrawerIcon');
+        icon?.classList.remove('closedIcon');
+        icon?.classList.add('openIcon');
+    }
+    if (panel.scrollTop !== view.scrollTop) panel.scrollTop = view.scrollTop;
+}
+
+function finishFoldyDrawerRestore(view) {
+    // 반복 감시 대신 클릭 처리와 드로어 애니메이션이 끝나는 몇 지점에서만
+    // 확인한다. 정상적으로 열려 있으면 DOM을 전혀 쓰지 않는다.
+    restoreFoldyDrawerView(view);
+    queueMicrotask(() => restoreFoldyDrawerView(view));
+    requestAnimationFrame(() => restoreFoldyDrawerView(view));
+    setTimeout(() => restoreFoldyDrawerView(view), 120);
+    setTimeout(() => restoreFoldyDrawerView(view), 420);
+}
+
 function getFoldyFolderDeleteButton(target) {
     if (!(target instanceof Element)) return null;
     const button = target.closest('.foldy-folder-actions .caution, .foldy-folder-actions [title="폴더 삭제"]');
@@ -550,7 +592,7 @@ function unwrapFoldyLoreFolderInPlace(folderElement) {
     folderElement.remove();
 }
 
-async function deleteFoldyLoreFolderOnly(deleteButton) {
+async function deleteFoldyLoreFolderOnly(deleteButton, drawerView) {
     const folderElement = getFoldyFolderFromActionButton(deleteButton);
     const folderId = folderElement?.dataset?.foldyId;
     const book = currentBookName();
@@ -578,7 +620,9 @@ async function deleteFoldyLoreFolderOnly(deleteButton) {
 
     const folderName = String(folder.name || folderElement.querySelector('.foldy-folder-name')?.textContent || '이름 없는 폴더').trim();
     closeFoldyFolderActionMenu(deleteButton);
+    restoreFoldyDrawerView(drawerView);
     const confirmed = window.confirm(`“${folderName}” 폴더만 삭제하고 안의 로어북 항목 ${folder.items?.length || 0}개를 최상위로 옮길까요?\n\n로어북 항목과 내용은 삭제되지 않습니다.`);
+    restoreFoldyDrawerView(drawerView);
     if (!confirmed) return;
 
     const previousLayout = layout;
@@ -600,6 +644,7 @@ async function deleteFoldyLoreFolderOnly(deleteButton) {
         await saveSettings();
         state.foldyLoreLayoutPersistedSignature = getFoldyLoreLayoutSignature();
         unwrapFoldyLoreFolderInPlace(folderElement);
+        restoreFoldyDrawerView(drawerView);
         scheduleEnhance();
         notify(`“${folderName}” 폴더를 삭제하고 내부 항목을 최상위로 옮겼습니다.`, 'success');
     } catch (error) {
@@ -703,6 +748,10 @@ function armFoldyFolderDeleteDrawerGuard(event) {
     // 위의 폴더 전용 삭제 경로만 실행한다.
     deleteButton.classList.remove('delete_entry_button');
 
+    if (event.type === 'pointerdown') {
+        deleteButton.__slbFoldyDrawerView = captureFoldyDrawerView();
+    }
+
     // window 캡처 단계는 document/버튼 리스너보다 먼저 실행된다. 여기서
     // 이벤트 전파를 끊으면 포털 메뉴 클릭을 "드로어 바깥 클릭"으로 보는
     // SillyTavern 경로와 Foldy의 네이티브 엔트리 삭제 경로가 아예 실행되지
@@ -713,8 +762,14 @@ function armFoldyFolderDeleteDrawerGuard(event) {
     if (event.type !== 'click' || deleteButton.dataset.slbFolderDeletePending === 'true') return;
 
     deleteButton.dataset.slbFolderDeletePending = 'true';
-    void deleteFoldyLoreFolderOnly(deleteButton)
-        .finally(() => delete deleteButton.dataset.slbFolderDeletePending);
+    const drawerView = deleteButton.__slbFoldyDrawerView || captureFoldyDrawerView();
+    restoreFoldyDrawerView(drawerView);
+    void deleteFoldyLoreFolderOnly(deleteButton, drawerView)
+        .finally(() => {
+            finishFoldyDrawerRestore(drawerView);
+            delete deleteButton.dataset.slbFolderDeletePending;
+            delete deleteButton.__slbFoldyDrawerView;
+        });
 }
 
 function getUid(entry) {
