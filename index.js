@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.38';
+const VERSION = '1.4.39';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -127,6 +127,7 @@ const state = {
     foldyLoreLayoutSaveQueued: false,
     foldyDomMoveInProgress: false,
     foldyLayoutSettleRaf: 0,
+    foldyLayoutSettleTimer: null,
     foldyRevealPending: false,
     googleTranslationQueue: Promise.resolve(),
 };
@@ -136,10 +137,12 @@ function beginFoldyLayoutSettle(entries) {
 
     // Foldy rebuilds the lorebook list asynchronously. During that transaction
     // an entry can briefly exist inside its new folder before its native title
-    // header has been restored. Hide only those entry rows until Foldy finishes,
-    // then let the lore manager enhance the completed DOM once.
+    // header has been restored. Mask the whole list (not individual children,
+    // whose !important visibility rules can pierce a hidden parent), then let
+    // the lore manager enhance the completed DOM once.
     entries.classList.add('slb-foldy-settling');
-    if (state.foldyLayoutSettleRaf) return;
+    if (state.foldyLayoutSettleRaf) cancelAnimationFrame(state.foldyLayoutSettleRaf);
+    if (state.foldyLayoutSettleTimer) clearTimeout(state.foldyLayoutSettleTimer);
 
     const waitForFoldy = () => {
         state.foldyLayoutSettleRaf = 0;
@@ -152,9 +155,19 @@ function beginFoldyLayoutSettle(entries) {
             return;
         }
 
-        state.foldyRevealPending = true;
-        state.navigatorDirty = true;
-        scheduleEnhance();
+        // Foldy removes its pending marker immediately after appending the
+        // fragment. One short quiet window coalesces the remaining observer
+        // records so folder creation and item moves produce one enhancement.
+        state.foldyLayoutSettleTimer = setTimeout(() => {
+            state.foldyLayoutSettleTimer = null;
+            if (!entries.isConnected || entries.classList.contains('foldy-lore-pending')) {
+                beginFoldyLayoutSettle(entries);
+                return;
+            }
+            state.foldyRevealPending = true;
+            state.navigatorDirty = true;
+            scheduleEnhance();
+        }, 34);
     };
 
     state.foldyLayoutSettleRaf = requestAnimationFrame(waitForFoldy);
@@ -3248,7 +3261,11 @@ function bindWorkspaceEntries(entries) {
             state.navigatorDirty = true;
             return;
         }
-        if (isFoldyLoreMutation(entries, mutations)) void persistFoldyLoreLayoutIfChanged();
+        const foldyMutation = isFoldyLoreMutation(entries, mutations);
+        if (foldyMutation) {
+            beginFoldyLayoutSettle(entries);
+            void persistFoldyLoreLayoutIfChanged();
+        }
         if (state.bookSwitch && !state.bookSwitch.ready) {
             if (mutations.some(mutation => mutation.type === 'childList')) {
                 scheduleBookSwitchReadyCheck(70);
@@ -5546,13 +5563,12 @@ function scheduleBookSwitchReadyCheck(delay = 32) {
         transition.ready = true;
         state.navigatorDirty = true;
         const book = transition.book;
-        // 새 책의 네이티브 제목 행이 확인되면 가림막부터 걷는다. 부가 헤더와
-        // 상세 편집기 변환은 다음 페인트 이후에 시작하여, 이전처럼 모든
-        // 확장 UI가 완성될 때까지 빈 목록을 보여주지 않는다.
+        // 새 책의 네이티브 제목 행을 확인한 뒤에도 가림막은 유지한다.
+        // 로어북 매니저 헤더까지 완성한 enhanceAll의 finish에서만 해제한다.
         finishBookSwitch(book);
-        requestAnimationFrame(() => requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
             if (currentBookName() === book) scheduleEnhance();
-        }));
+        });
     }, delay);
 }
 
@@ -5613,11 +5629,9 @@ function finishBookSwitch(book) {
     if (!transition || transition.book !== book || currentBookName() !== book) return;
     clearTimeout(transition.timer);
     state.bookSwitch = null;
-    requestAnimationFrame(() => {
-        // 이 프레임 사이 사용자가 또 다른 책을 골랐다면 새 전환의 가림막을
-        // 이전 전환 완료 콜백이 해제해서는 안 된다.
-        if (!state.bookSwitch && currentBookName() === book) setBookSwitchLoading(false);
-    });
+    // 네이티브 행이 생겼다는 이유만으로 여기서 가림막을 먼저 풀면 모바일
+    // 배지와 버튼만 한 프레임 노출된다. enhanceAll의 완료 지점에서 제목과
+    // 헤더까지 전부 정리된 뒤 가림막을 해제한다.
 }
 
 function enhanceAll() {
@@ -5660,19 +5674,27 @@ function enhanceAll() {
             && !state.tokenRefreshRunId) {
             scheduleInitialTokenSummary(null, 450);
         }
+        // 항목이 한꺼번에 추가되거나 Foldy가 폴더 안으로 옮기는 동안 들어온
+        // 추가 mutation이 있으면 지금 화면을 공개하지 않는다. 이어지는 한
+        // 번의 안정화 패스까지 끝나야 제목·배지·버튼이 모두 갖춰진 상태다.
         const needsAnotherEnhancePass = state.enhancePending;
         if (needsAnotherEnhancePass) {
             state.enhancePending = false;
             scheduleEnhance();
         }
-        if (state.foldyRevealPending && !needsAnotherEnhancePass) {
-            state.foldyRevealPending = false;
-            requestAnimationFrame(() => {
-                const currentEntries = document.getElementById('world_popup_entries_list');
-                if (!currentEntries?.classList.contains('foldy-lore-pending')) {
-                    currentEntries?.classList.remove('slb-foldy-settling');
-                }
-            });
+        if (!needsAnotherEnhancePass) {
+            if (state.foldyRevealPending) {
+                state.foldyRevealPending = false;
+                requestAnimationFrame(() => {
+                    const currentEntries = document.getElementById('world_popup_entries_list');
+                    if (!currentEntries?.classList.contains('foldy-lore-pending')) {
+                        currentEntries?.classList.remove('slb-foldy-settling');
+                    }
+                });
+            }
+            if (!state.bookSwitch && currentBookName() === bookAtStart) {
+                setBookSwitchLoading(false);
+            }
         }
     };
 
