@@ -657,6 +657,35 @@
     min-width: 0;
 }
 
+/* 로어북 전환 중 이전 책의 행이나 절반만 개조된 새 행을 화면에 노출하지
+   않는다. 목록은 백그라운드에서 완성하고 마지막 프레임에 한 번에 연다. */
+#WorldInfo.slb-active.slb-book-switching #world_popup_entries_list {
+    position: relative;
+    box-sizing: border-box;
+    height: 64px !important;
+    min-height: 64px !important;
+    max-height: 64px !important;
+    overflow: hidden !important;
+    pointer-events: none;
+}
+
+#WorldInfo.slb-active.slb-book-switching #world_popup_entries_list > * {
+    visibility: hidden !important;
+}
+
+#WorldInfo.slb-active.slb-book-switching #world_popup_entries_list::before {
+    content: '로어북 불러오는 중…';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    visibility: visible !important;
+    color: var(--SmartThemeBodyColor, inherit);
+    font-size: 0.9em;
+    opacity: 0.7;
+}
+
 #WorldInfo.slb-active #world_popup_entries_list > .world_entry {
     margin: 0 0 8px;
 }

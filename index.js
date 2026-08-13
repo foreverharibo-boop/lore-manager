@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.34';
+const VERSION = '1.4.35';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -85,6 +85,8 @@ const state = {
     enhancePending: false,
     enhanceRunId: 0,
     enhanceChunkRaf: 0,
+    bookSwitchRunId: 0,
+    bookSwitch: null,
     tokenTimer: null,
     tokenRenderTimer: null,
     tokenRunId: 0,
@@ -3176,6 +3178,12 @@ function bindWorkspaceEntries(entries) {
     ].join(',');
     state.observer = new MutationObserver(mutations => {
         if (isFoldyLoreMutation(entries, mutations)) void persistFoldyLoreLayoutIfChanged();
+        if (state.bookSwitch && !state.bookSwitch.ready) {
+            if (mutations.some(mutation => mutation.type === 'childList')) {
+                scheduleBookSwitchReadyCheck(70);
+            }
+            return;
+        }
         // 네이티브 드래그 정렬 중에는 jQuery UI가 헬퍼/플레이스홀더를 만들면서
         // 변이가 쏟아진다. 이때 enhance가 돌면 드래그 중인 DOM을 재구성해서
         // 정렬이 끊기므로 전부 무시하고, 드래그가 끝난 뒤 한 번에 갱신한다.
@@ -5353,6 +5361,119 @@ function scheduleTokenSummary(data = null, delay = 500) {
     state.tokenTimer = setTimeout(() => refreshTokenSummary(data), delay);
 }
 
+function setBookSwitchLoading(active) {
+    const worldInfo = document.getElementById('WorldInfo');
+    worldInfo?.classList.toggle('slb-book-switching', Boolean(active));
+    const entries = document.getElementById('world_popup_entries_list');
+    if (active) entries?.setAttribute('aria-busy', 'true');
+    else entries?.removeAttribute('aria-busy');
+}
+
+function getRenderedEntryTitle(entry) {
+    const control = findCompatibleControl(entry, {
+        names: ['comment', 'entryComment', 'memo'],
+        classes: ['textarea.WIEntryTitle', 'textarea.world_entry_comment', 'textarea.entry-title'],
+        blocks: ['.WIEntryTitleAndStatus', '.WIEntryTitleStatus', '.world_entry_title_and_status', '[data-role="entry-title-status"]'],
+        labels: ['Title/Memo', 'Entry Title', 'Memo', '제목'],
+        control: 'textarea, input[type="text"]',
+    });
+    return control ? String(control.value ?? '') : null;
+}
+
+function isCurrentBookDomReady(transition) {
+    if (!transition || currentBookName() !== transition.book) return false;
+    const entries = document.getElementById('world_popup_entries_list');
+    if (!entries || !transition.data?.entries) return false;
+    const rows = renderedEntries();
+    if (!rows.length) return Date.now() - transition.startedAt >= 220;
+
+    return rows.every(row => {
+        const uid = getUid(row);
+        const expected = transition.data.entries?.[uid] ?? transition.data.entries?.[Number(uid)];
+        if (!expected) return false;
+        const renderedTitle = getRenderedEntryTitle(row);
+        return renderedTitle !== null && renderedTitle === String(expected.comment ?? '');
+    });
+}
+
+function scheduleBookSwitchReadyCheck(delay = 70) {
+    const transition = state.bookSwitch;
+    if (!transition || transition.ready) return;
+    clearTimeout(transition.timer);
+    transition.timer = setTimeout(() => {
+        if (state.bookSwitch !== transition || currentBookName() !== transition.book) return;
+        const elapsed = Date.now() - transition.startedAt;
+        if (!isCurrentBookDomReady(transition) && elapsed < 4500) {
+            scheduleBookSwitchReadyCheck(80);
+            return;
+        }
+        transition.ready = true;
+        state.navigatorDirty = true;
+        scheduleEnhance();
+    }, delay);
+}
+
+function beginBookSwitch(book) {
+    const previous = state.bookSwitch;
+    if (previous?.timer) clearTimeout(previous.timer);
+    state.bookSwitch = null;
+    state.bookSwitchRunId++;
+
+    // 진행 중이던 이전 책의 분할 UI 작업을 즉시 폐기한다. 이전 행 일부만
+    // 꾸며진 상태가 다음 책 화면에 노출되는 것을 막기 위한 전환 경계다.
+    state.enhanceRunId++;
+    if (state.enhanceChunkRaf) cancelAnimationFrame(state.enhanceChunkRaf);
+    state.enhanceChunkRaf = 0;
+    state.enhancing = false;
+    state.enhancePending = false;
+
+    if (!book) {
+        setBookSwitchLoading(false);
+        scheduleEnhance();
+        return;
+    }
+
+    const transition = {
+        runId: state.bookSwitchRunId,
+        book,
+        data: null,
+        ready: false,
+        timer: null,
+        startedAt: Date.now(),
+    };
+    state.bookSwitch = transition;
+    setBookSwitchLoading(true);
+
+    Promise.resolve(loadWorldInfo(book))
+        .then(data => {
+            if (state.bookSwitch !== transition || currentBookName() !== book) return;
+            transition.data = data;
+            if (data?.entries) {
+                state.currentBook = book;
+                state.currentBookData = data;
+            }
+            scheduleBookSwitchReadyCheck(50);
+        })
+        .catch(error => {
+            console.warn('[로어북 매니저] 전환 화면 확인용 로어북 로드 실패', error);
+            if (state.bookSwitch !== transition) return;
+            scheduleBookSwitchReadyCheck(120);
+        });
+    scheduleBookSwitchReadyCheck(90);
+}
+
+function finishBookSwitch(book) {
+    const transition = state.bookSwitch;
+    if (!transition || transition.book !== book || currentBookName() !== book) return;
+    clearTimeout(transition.timer);
+    state.bookSwitch = null;
+    requestAnimationFrame(() => {
+        // 이 프레임 사이 사용자가 또 다른 책을 골랐다면 새 전환의 가림막을
+        // 이전 전환 완료 콜백이 해제해서는 안 된다.
+        if (!state.bookSwitch && currentBookName() === book) setBookSwitchLoading(false);
+    });
+}
+
 function enhanceAll() {
     if (state.sorting || state.enhancing) return;
     ensureCriticalLayoutStyles();
@@ -5370,10 +5491,25 @@ function enhanceAll() {
         if (runId !== state.enhanceRunId) return;
         state.enhancing = false;
         state.enhanceChunkRaf = 0;
+
+        const transition = state.bookSwitch?.book === bookAtStart ? state.bookSwitch : null;
+        const incompleteEntry = transition && entries.some(entry => {
+            if (!entry?.isConnected) return false;
+            if (!entry.querySelector('.slb-entry-header-shell')) return true;
+            if (!isEntryEditorRendered(entry)) return false;
+            const edit = queryCompatible(entry, ['.world_entry_edit', '.world-entry-edit', '[data-role="entry-editor"]']);
+            return !hasCompleteEnhancedEditor(edit);
+        });
+        if (incompleteEntry && Date.now() - transition.startedAt < 4500) {
+            setTimeout(scheduleEnhance, 70);
+            return;
+        }
+
         syncResponsiveEntryLayouts();
         applyMobileDisplaySettings();
         syncFilterButtons();
         syncAutoControls();
+        finishBookSwitch(bookAtStart);
 
         // The editor can render its selected lorebook after this extension's first
         // token pass. Re-run once entries exist so the summary never stays at “—”.
@@ -5413,6 +5549,10 @@ function enhanceAll() {
 }
 
 function scheduleEnhance() {
+    if (state.bookSwitch && !state.bookSwitch.ready) {
+        scheduleBookSwitchReadyCheck();
+        return;
+    }
     if (state.enhancing) {
         state.enhancePending = true;
         return;
@@ -5453,7 +5593,7 @@ function bindEvents() {
         for (const timer of state.entryTokenTimers.values()) clearTimeout(timer);
         state.entryTokenTimers.clear();
         setTokenSummaryPending();
-        scheduleEnhance();
+        beginBookSwitch(currentBookName());
         // 새 책의 네이티브 목록을 먼저 보여준 뒤 토크나이저를 시작한다.
         // 캐시가 있는 항목은 refreshTokenSummary 첫 렌더에서 즉시 표시된다.
         scheduleTokenSummary(null, isNarrowEntryLayout() ? 700 : 420);
