@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.42';
+const VERSION = '1.4.43';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -109,6 +109,7 @@ const state = {
     sourceTimers: new Map(),
     translationTimers: new Map(),
     entryStateSyncTimers: new WeakMap(),
+    entryStateStabilizationRuns: new WeakMap(),
     entryFilterRefreshPending: false,
     entryFilterRefreshTimer: null,
     entryStateValues: new WeakMap(),
@@ -488,7 +489,7 @@ function scheduleMobileEntryStateBadgeRepair(entry) {
     requestAnimationFrame(() => repairMobileEntryStateBadge(entry));
 }
 
-function applyMobileDisplaySettings(syncEntries = true) {
+function applyMobileDisplaySettings() {
     const worldInfo = document.getElementById('WorldInfo');
     if (!worldInfo) return;
     const settings = getSettings();
@@ -498,10 +499,10 @@ function applyMobileDisplaySettings(syncEntries = true) {
     worldInfo.classList.toggle('slb-mobile-entry-state-enabled', settings.showMobileEntryState);
     worldInfo.classList.toggle('slb-mobile-token-summary-hidden', !settings.showMobileTokenSummary);
     worldInfo.classList.toggle('slb-mobile-entry-filters-hidden', !settings.showMobileEntryFilters);
-    // 첫 로어북 화면을 구성하는 동안에는 enhanceEntryHeader가 각 항목의
-    // 배지를 바로 완성한다. 여기서 원시 항목 전체를 먼저 한 번 더 훑으면
-    // 긴 로어북의 첫 표시만 늦어지므로, 전역 클래스만 적용할 수 있게 한다.
-    if (syncEntries) renderedEntries().forEach(syncMobileEntryStateBadge);
+    // 이 전체 동기화는 단순 표시용 반복이 아니다. ST가 주입 방식 저장 중
+    // select/header 일부를 다시 그린 뒤에도 제목 옆 배지를 새 네이티브
+    // select와 다시 연결하는 모바일 안정화 단계이므로 생략하지 않는다.
+    renderedEntries().forEach(syncMobileEntryStateBadge);
 }
 
 function notify(message, type = 'info') {
@@ -3167,7 +3168,7 @@ function createAIBar() {
         }
     });
     syncQuickTranslationOptionsPlacement();
-    applyMobileDisplaySettings(false);
+    applyMobileDisplaySettings();
     renderBackupList();
 }
 
@@ -3333,6 +3334,44 @@ function scheduleEntryInjectionStateSync(entry) {
         syncEntryInjectionState(entry);
     }, 0);
     state.entryStateSyncTimers.set(entry, timer);
+}
+
+function scheduleEntryInjectionStateStabilization(entry, expectedValue) {
+    if (!entry?.isConnected) return;
+    const runId = (state.entryStateStabilizationRuns.get(entry) || 0) + 1;
+    state.entryStateStabilizationRuns.set(entry, runId);
+
+    const stabilize = () => {
+        if (!entry.isConnected || state.entryStateStabilizationRuns.get(entry) !== runId) return;
+        const selector = queryCompatible(entry, [
+            'select[name="entryStateSelector"]',
+            'select[name="entryStatus"]',
+            'select[name="entryState"]',
+            'select.WIEntryStatusSelect',
+            'select.world_entry_state',
+            'select.entryStateSelector',
+        ]);
+        // 더 늦은 사용자 변경이 들어왔으면 이전 값의 복구 작업은 즉시 폐기한다.
+        if (selector && selector.value !== expectedValue) return;
+
+        // 네이티브 저장이 select/header 노드를 교체했더라도 현재 노드 기준으로
+        // 제목 옆 배지를 다시 연결하고 같은 값을 반영한다.
+        syncMobileEntryStateBadge(entry);
+
+        // Android 네이티브 select가 아직 선택 이벤트를 끝내는 중에는 필드의
+        // 부모를 옮기지 않는다. 이후의 제한된 재확인에서 안전하게 복구한다.
+        if (selector && document.activeElement === selector) return;
+        if (getResponsiveHeaderFields(entry).length !== 5 && !recoverResponsiveHeaderFields(entry)) {
+            scheduleNativeHeaderRecovery(entry);
+            return;
+        }
+        placeResponsiveHeaderFields(entry, isNarrowEntryLayout(entry));
+    };
+
+    // ST 1.18의 동기 input 저장, 다음 프레임 헤더 보정, 모바일의 지연 DOM
+    // 정리를 모두 지나되 해당 항목 하나만 확인해 전체 목록 로딩에는 영향 없다.
+    requestAnimationFrame(stabilize);
+    for (const delay of [80, 260, 720]) setTimeout(stabilize, delay);
 }
 
 function handleWorkspaceEntryInput(event) {
@@ -3574,7 +3613,7 @@ function createWorkspace() {
     bindWorkspacePopupObserver(popup);
     syncQuickTranslationOptionsPlacement();
     syncFilterButtons();
-    applyMobileDisplaySettings(false);
+    applyMobileDisplaySettings();
 }
 
 function installEntryStateFilter() {
@@ -3750,7 +3789,7 @@ function restoreNativeDragHandle(header, toggles) {
     return handle;
 }
 
-function enhanceEntryHeader(entry, forceCompact = false) {
+function enhanceEntryHeader(entry) {
     if (!entry) return;
     bindEntryDrawerLifecycle(entry);
     // 버전 문자열이 달라도(업데이트 직후, 과거 중복 설치 잔재) 구조가
@@ -3896,7 +3935,7 @@ function enhanceEntryHeader(entry, forceCompact = false) {
     syncEntryHeaderActions(entry);
     syncMobileEntryStateBadge(entry);
     observeResponsiveHeader(entry);
-    placeResponsiveHeaderFields(entry, forceCompact);
+    placeResponsiveHeaderFields(entry);
 }
 
 function entryData(uid) {
@@ -3949,6 +3988,7 @@ function syncEntryInjectionState(entry) {
         data.vectorized = selectorValue === 'vectorized';
     }
     scheduleMobileEntryStateBadgeRepair(entry);
+    scheduleEntryInjectionStateStabilization(entry, selectorValue);
     clearTimeout(state.entryFilterRefreshTimer);
     state.entryFilterRefreshTimer = setTimeout(refreshEntryStateFilterIfIdle, 150);
     enforceActivationOverviewIntegrity();
@@ -4218,12 +4258,11 @@ function placeResponsiveHeaderFields(entry, forceCompact = false) {
     const compact = forceCompact || shouldUseCompactHeader(entry);
     const activationActive = entry.dataset.slbActiveTab === 'activation' || Boolean(activationPanel
         ?.classList.contains('is-active'));
-    // 패널이 렌더되어 있으면 드로어는 확실히 열려 있다. 아이콘/표식 판정은
-    // 보조 신호로만 쓴다. 접힌 기본 목록이나 다른 탭에서는 결과를 쓰지
-    // 않으므로 비싼 drawer 탐색/getComputedStyle도 실행하지 않는다.
-    const drawerOpen = activationActive
-        ? (panelVisible || isEntryDrawerStablyOpen(entry))
-        : false;
+    // 주입 방식 저장 중에는 활성 탭/패널 클래스가 한 프레임 사라질 수 있다.
+    // 그 순간에도 마지막 실제 drawer 상태를 읽어야 다섯 필드가 숨김 stash로
+    // 빠지지 않는다. 이 검사를 activationActive 뒤로 미루면 호출 조건 첫 줄이
+    // 통째로 사라지는 모바일 회귀가 생긴다.
+    const drawerOpen = panelVisible || isEntryDrawerStablyOpen(entry);
     // 좁은 화면에서도 호출 조건 탭을 보고 있을 때만 editOutlet 내부로
     // 이동한다. 그 외에는 삭제되지 않는 헤더 stash에 안전하게 보관한다.
     const target = compact
@@ -5945,11 +5984,11 @@ function enhanceAll() {
         state.enhancing = false;
         state.enhanceChunkRaf = 0;
 
-        // 각 헤더와 열린 편집기는 자기 배치·배지를 구성하면서 이미 한 번
-        // 정리됐다. 목록 공개 직전에 전체 항목을 다시 두 번 순회하지 않는다.
-        // 공개가 아직 보류된 예외 경로에서만 마지막 복구 순회를 수행한다.
-        if (!listRevealed) syncResponsiveEntryLayouts();
-        applyMobileDisplaySettings(false);
+        // ST가 저장 중 헤더 일부를 교체할 수 있으므로 마지막 전체 복구 패스는
+        // 항상 유지한다. 데이터 중복 요청 제거와 큰 렌더 묶음 최적화는 그대로라
+        // 첫 로딩 속도를 크게 되돌리지 않으면서 모바일 필드 보존을 보장한다.
+        syncResponsiveEntryLayouts();
+        applyMobileDisplaySettings();
         syncFilterButtons();
         syncAutoControls();
         // The editor can render its selected lorebook after this extension's first
@@ -6018,7 +6057,7 @@ function enhanceAll() {
         for (; index < hardEnd; index++) {
             const entry = entries[index];
             if (!entry?.isConnected) continue;
-            enhanceEntryHeader(entry, narrowLayout);
+            enhanceEntryHeader(entry);
             if (isEntryEditorRendered(entry)) openedEntries.push(entry);
             if (index > start && performance.now() >= deadline) {
                 index += 1;
@@ -6216,7 +6255,7 @@ function init() {
             changedEntries.forEach(entry => placeResponsiveHeaderFields(entry));
         });
     }
-    applyMobileDisplaySettings(false);
+    applyMobileDisplaySettings();
     if (isWorldInfoDrawerOpen() && currentBookName() && !hasCompleteVisibleEntryHeaders()) {
         beginWorldDrawerOpenLoading();
     }
