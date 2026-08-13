@@ -4210,7 +4210,7 @@
     grid-row: 1 !important;
 }
 
-/* v1.4.52 — extension-tab single-choice manager mode selector. */
+/* v1.4.53 — two isolated manager engines with a CSS-only standard boundary. */
 .slb-manager-mode-settings {
     display: grid;
     gap: 6px;
@@ -4306,6 +4306,11 @@
     #foldy_lore_collapse_all,
     #foldy_lore_root_bulk_move
 ) {
+    display: none !important;
+}
+
+#WorldInfo.slb-manager-standard-mode #world_info_sort_order option[value='foldy-order'],
+#WorldInfo.slb-manager-standard-mode #world_info_sort_order option[value='foldy'] {
     display: none !important;
 }
 
