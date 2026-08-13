@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.53';
+const VERSION = '1.4.54';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -95,6 +95,7 @@ const state = {
     enhanceChunkRaf: 0,
     bookSwitchRunId: 0,
     bookSwitch: null,
+    worldSelectTransitionBoundary: null,
     bookDataHydration: null,
     worldDrawerOpening: false,
     drawerOpenLoadingTimer: null,
@@ -3297,6 +3298,8 @@ function bindWorkspaceEntries(entries) {
             // SillyTavern은 새 로어북에서 행을 교체한다. 실제 childList 작업이
             // 있었음을 기록해 같은 개수의 새 행도 전환 완료로 판정한다.
             state.bookSwitch.domMutationObserved = true;
+            state.bookSwitch.domMutationVersion += 1;
+            state.bookSwitch.readyCandidate = null;
             scheduleBookSwitchReadyCheck(0);
         }
         if (state.bookSwitch && !state.bookSwitch.ready) {
@@ -5710,41 +5713,142 @@ function hydrateCurrentBookDataAfterReveal(book) {
         });
 }
 
+function bookSwitchTitleControl(entry) {
+    return entry?.querySelector([
+        '.slb-title-field textarea',
+        '.slb-title-field input[type="text"]',
+        'textarea[name="comment"]',
+        'textarea[name="entryComment"]',
+        'textarea[name="memo"]',
+        'textarea.WIEntryTitle',
+        'textarea.world_entry_comment',
+        'textarea.entry-title',
+    ].join(', ')) || null;
+}
+
+function bookSwitchStateControl(entry) {
+    return entry?.querySelector([
+        'select[name="entryStateSelector"]',
+        'select[name="entryStatus"]',
+        'select[name="entryState"]',
+        'select.WIEntryStatusSelect',
+        'select.world_entry_state',
+        'select.entryStateSelector',
+    ].join(', ')) || null;
+}
+
+function snapshotBookSwitchRows(rows) {
+    return rows.map(row => {
+        const titleControl = bookSwitchTitleControl(row);
+        const stateControl = bookSwitchStateControl(row);
+        return {
+            row,
+            parent: row.parentElement,
+            uid: getUid(row),
+            nativeHeader: row.querySelector('.inline-drawer-header, .world_entry_header, .world-entry-header, [data-role="entry-header"]'),
+            titleControl,
+            titleValue: String(titleControl?.value ?? ''),
+            stateControl,
+            stateValue: String(stateControl?.value ?? ''),
+        };
+    });
+}
+
+function sameBookSwitchRowSnapshot(left, right) {
+    if (!left || !right || left.length !== right.length) return false;
+    return left.every((before, index) => {
+        const after = right[index];
+        return before.row === after.row
+            && before.parent === after.parent
+            && before.uid === after.uid
+            && before.nativeHeader === after.nativeHeader
+            && before.titleControl === after.titleControl
+            && before.titleValue === after.titleValue
+            && before.stateControl === after.stateControl
+            && before.stateValue === after.stateValue;
+    });
+}
+
+function captureBookSwitchBoundary() {
+    const previousRows = renderedEntries();
+    const entries = document.getElementById('world_popup_entries_list');
+    return {
+        capturedAt: Date.now(),
+        mode: state.managerMode,
+        book: currentBookName(),
+        previousRows,
+        previousRowSet: new Set(previousRows),
+        previousRowSnapshot: snapshotBookSwitchRows(previousRows),
+        previousHeader: entries?.querySelector('#WIEntryHeaderTitlesPC') || null,
+    };
+}
+
+function bookSwitchRowsChanged(transition, rows) {
+    const currentSnapshot = snapshotBookSwitchRows(rows);
+    const changed = !sameBookSwitchRowSnapshot(transition.previousRowSnapshot, currentSnapshot);
+    return { changed, currentSnapshot };
+}
+
+function isStableBookSwitchCandidate(transition, header, currentSnapshot) {
+    const candidate = transition.readyCandidate;
+    if (!candidate
+        || candidate.header !== header
+        || candidate.domMutationVersion !== transition.domMutationVersion
+        || !sameBookSwitchRowSnapshot(candidate.rows, currentSnapshot)) {
+        transition.readyCandidate = {
+            header,
+            domMutationVersion: transition.domMutationVersion,
+            rows: currentSnapshot,
+        };
+        return false;
+    }
+    return true;
+}
+
 function isCurrentBookDomReady(transition) {
     if (!transition || currentBookName() !== transition.book) return false;
     const entries = document.getElementById('world_popup_entries_list');
     if (!entries) return false;
     const rows = renderedEntries();
+    const header = entries.querySelector('#WIEntryHeaderTitlesPC');
+    const { changed: rowsChanged, currentSnapshot } = bookSwitchRowsChanged(transition, rows);
+
     if (transition.requireNativeMutation) {
         if (!transition.domMutationObserved) return false;
-        const rowNodesChanged = rows.length !== transition.previousRows.length
-            || rows.some(row => !transition.previousRowSet.has(row));
-        if (rowNodesChanged) return true;
-        const header = entries.querySelector('#WIEntryHeaderTitlesPC');
-        return Boolean(!rows.length && header && header !== transition.previousHeader);
     }
-    // 연동 모드는 Foldy 원본의 비동기 렌더가 끝나고 실제 목록 노드가 교체된
-    // 뒤에만 준비 완료로 본다. 매니저의 가림 클래스는 헤더 완료까지 유지한다.
-    if (isFoldyLinkedMode()) {
+
+    // 전환 시작 당시 모드를 고정해서 판단한다. 기존 모드의 완료 검사는
+    // Foldy 클래스·옵션·DOM을 전혀 읽지 않고 SillyTavern의 네이티브 행만 본다.
+    if (transition.mode === MANAGER_MODE_FOLDY) {
         if (entries.classList.contains('foldy-lore-pending') || !transition.domMutationObserved) return false;
-        if (!rows.length) return Boolean(entries.querySelector('#WIEntryHeaderTitlesPC'));
-        return rows.length !== transition.previousRows.length
-            || rows.some(row => !transition.previousRowSet.has(row));
+        if (!rows.length && !header) return false;
+        // Foldy는 새 행을 만들 수도, 같은 행을 폴더로 옮길 수도 있다. 실제
+        // 변경 뒤 동일한 두 시점이 확인돼야 중간 폴더 배치를 공개하지 않는다.
+        return isStableBookSwitchCandidate(transition, header, currentSnapshot);
     }
+
     // SillyTavern은 렌더 시작 시 기존 행을 먼저 비운 뒤 항목 템플릿을
     // 비동기로 만든다. 행이 0개라는 이유만으로 완료 처리하면 그 중간의
     // 빈 화면을 공개하게 된다. 빈 로어북도 마지막에 붙는 네이티브 제목
     // 행이 생겼을 때만 완료로 인정한다.
-    if (!rows.length) return Boolean(entries.querySelector('#WIEntryHeaderTitlesPC'));
+    if (!rows.length) {
+        if (!header) return false;
+        if (!transition.domMutationObserved && header === transition.previousHeader) return false;
+        return isStableBookSwitchCandidate(transition, header, currentSnapshot);
+    }
 
-    // 실리태번이 선택 변경 뒤 목록 노드를 교체했다면 확장 쪽 데이터 요청을
-    // 기다릴 필요가 없다. 매 16ms마다 모든 제목 문자열을 만드는 대신 노드
-    // 교체 여부만 확인해 큰 페이지의 전환 검사 비용을 일정하게 유지한다.
-    const rowNodesChanged = rows.length !== transition.previousRows.length
-        || rows.some(row => !transition.previousRowSet.has(row));
-    if (rowNodesChanged) return true;
+    // 실리태번은 버전에 따라 행 자체를 교체하거나, 같은 .world_entry의
+    // children/컨트롤 값만 새 로어북 데이터로 바꾼다. 행 identity 하나만
+    // 비교하면 후자의 정상 렌더를 30초 동안 기다리게 된다.
+    const freshNativeRows = transition.previousBook
+        && transition.previousBook !== transition.book
+        && rows.some(row => !row.dataset.slbHeaderEnhanced);
+    if (!rowsChanged && !transition.domMutationObserved && !freshNativeRows) return false;
 
-    return false;
+    // 한 번의 고정 지연 대신 같은 현재 페이지 DOM을 연속 두 번 확인한다.
+    // 동기 렌더는 다음 프레임에 바로 끝나고, 여러 묶음으로 append되는 경우엔
+    // 마지막 mutation 뒤까지 후보가 자동으로 무효화된다.
+    return isStableBookSwitchCandidate(transition, header, currentSnapshot);
 }
 
 function scheduleBookSwitchReadyCheck(delay = 0) {
@@ -5766,9 +5870,11 @@ function scheduleBookSwitchReadyCheck(delay = 0) {
                 setBookSwitchLoading(false);
                 return;
             }
-            // 일반 경로는 DOM observer가 0ms 확인을 예약한다. 이 타이머는
-            // observer가 누락된 특이 브라우저만 보완하므로 느슨하게 돈다.
-            scheduleBookSwitchReadyCheck(50);
+            // 기존 모드는 새 행/컨트롤을 두 프레임 안에 판정한다. 1초가 지나도
+            // 렌더 신호가 없을 때만 느슨하게 확인해 불필요한 DOM 순회를 막는다.
+            scheduleBookSwitchReadyCheck(
+                transition.mode === MANAGER_MODE_STANDARD && elapsed < 1000 ? 16 : 50,
+            );
             return;
         }
         transition.ready = true;
@@ -5786,7 +5892,7 @@ function scheduleBookSwitchReadyCheck(delay = 0) {
     }, delay);
 }
 
-function beginBookSwitch(book) {
+function beginBookSwitch(book, suppliedBoundary = null) {
     const previous = state.bookSwitch;
     if (previous?.timer) clearTimeout(previous.timer);
     state.bookSwitch = null;
@@ -5806,18 +5912,29 @@ function beginBookSwitch(book) {
         return;
     }
 
-    const previousRows = renderedEntries();
-    const entriesList = document.getElementById('world_popup_entries_list');
+    const boundaryIsUsable = suppliedBoundary
+        && suppliedBoundary.mode === state.managerMode
+        && Date.now() - suppliedBoundary.capturedAt < 30000;
+    const boundary = boundaryIsUsable ? suppliedBoundary : captureBookSwitchBoundary();
+    const previousRows = boundary.previousRows;
     const transition = {
         runId: state.bookSwitchRunId,
         book,
+        mode: state.managerMode,
+        // change 이벤트 시점의 select 값은 이미 새 책이다. 데이터 캐시에 남은
+        // 현재 책 이름을 먼저 써야 늦게 호출된 프로그램 change에서도 새 raw
+        // 행을 이전 책으로 오인하지 않는다.
+        previousBook: state.currentBook || boundary.book || '',
         ready: false,
         timer: null,
         startedAt: Date.now(),
         previousRows,
-        previousRowSet: new Set(previousRows),
-        previousHeader: entriesList?.querySelector('#WIEntryHeaderTitlesPC') || null,
+        previousRowSet: boundary.previousRowSet,
+        previousRowSnapshot: boundary.previousRowSnapshot,
+        previousHeader: boundary.previousHeader,
         domMutationObserved: false,
+        domMutationVersion: 0,
+        readyCandidate: null,
         requireNativeMutation: false,
     };
     state.bookSwitch = transition;
@@ -6089,6 +6206,10 @@ function bindEvents() {
     }, { passive: true });
     const markWorldSelectionIntent = () => {
         state.worldSelectUserIntentUntil = Date.now() + 4000;
+        // pointer/keyboard 입력은 select 값이 바뀌기 전이다. 이전 로어북의
+        // 실제 행·제목·주입 컨트롤을 이 순간 보관해 두면, 먼저 등록된
+        // SillyTavern change 핸들러가 동기 렌더를 끝내도 새 목록과 비교할 수 있다.
+        state.worldSelectTransitionBoundary = captureBookSwitchBoundary();
     };
     worldSelect?.addEventListener('pointerdown', markWorldSelectionIntent, { passive: true });
     worldSelect?.addEventListener('keydown', markWorldSelectionIntent);
@@ -6099,6 +6220,14 @@ function bindEvents() {
             markWorldSelectionIntent();
         }
     }, { capture: true, passive: true });
+    worldSelect?.addEventListener('change', () => {
+        // target-capture는 SillyTavern의 기존 target-bubble change 핸들러보다
+        // 먼저 실행된다. pointerdown이 없는 프로그램 전환도 이 경계에서
+        // 이전 DOM을 잡아 기존 모드의 대기가 새 DOM을 기준으로 시작되지 않게 한다.
+        const boundary = state.worldSelectTransitionBoundary;
+        state.worldSelectTransitionBoundary = null;
+        beginBookSwitch(currentBookName(), boundary);
+    }, { capture: true });
     worldSelect?.addEventListener('change', event => {
         state.selectedUid = '';
         state.currentBook = '';
@@ -6110,7 +6239,14 @@ function bindEvents() {
         for (const timer of state.entryTokenTimers.values()) clearTimeout(timer);
         state.entryTokenTimers.clear();
         setTokenSummaryPending();
-        beginBookSwitch(currentBookName());
+        const book = currentBookName();
+        // capture 단계에서 만든 전환을 여기서 다시 시작하면 이전 DOM 기준점이
+        // 새 DOM으로 덮여 30초 대기가 재발한다. 같은 전환은 그대로 이어간다.
+        if (!state.bookSwitch || state.bookSwitch.book !== book) beginBookSwitch(book);
+        else {
+            state.pendingBookSwitch = book;
+            scheduleBookSwitchReadyCheck(0);
+        }
         // 새 책의 네이티브 목록을 먼저 보여준 뒤 토크나이저를 시작한다.
         // 캐시가 있는 항목은 refreshTokenSummary 첫 렌더에서 즉시 표시된다.
         scheduleInitialTokenSummary(null, isNarrowEntryLayout() ? 520 : 300);
