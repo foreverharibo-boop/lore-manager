@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.25';
+const VERSION = '1.4.26';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -115,6 +115,9 @@ const state = {
     responsiveRaf: 0,
     foldyDeleteGuardTimer: null,
     foldyDeleteGuardRunId: 0,
+    foldyLoreLayoutPersistedSignature: '',
+    foldyLoreLayoutSaveInFlight: false,
+    foldyLoreLayoutSaveQueued: false,
     googleTranslationQueue: Promise.resolve(),
 };
 
@@ -431,6 +434,64 @@ function currentBookName() {
     const option = select?.selectedOptions?.[0];
     const name = option && option.value !== '' ? option.textContent.trim() : '';
     return name;
+}
+
+function getFoldyLoreLayoutSignature() {
+    const lorebookLayouts = extension_settings?.foldy?.layouts?.lorebooks;
+    if (!lorebookLayouts || typeof lorebookLayouts !== 'object' || Array.isArray(lorebookLayouts)) return '';
+    try {
+        return JSON.stringify(lorebookLayouts);
+    } catch {
+        return '';
+    }
+}
+
+// Foldy는 폴더 구조를 메모리에 반영한 뒤 SillyTavern의 디바운스 저장만
+// 예약한다. 그 짧은 틈에 새로고침하면 화면에는 생성된 폴더가 서버 설정에
+// 아직 기록되지 않아 사라질 수 있다. Foldy의 저장 모델은 건드리지 않고,
+// 실제 로어북 폴더 레이아웃 값이 달라졌을 때만 ST 설정 저장을 즉시 확정한다.
+async function persistFoldyLoreLayoutIfChanged() {
+    const signature = getFoldyLoreLayoutSignature();
+    if (!signature || signature === state.foldyLoreLayoutPersistedSignature) return;
+    if (state.foldyLoreLayoutSaveInFlight) {
+        state.foldyLoreLayoutSaveQueued = true;
+        return;
+    }
+
+    state.foldyLoreLayoutSaveInFlight = true;
+    const targetSignature = signature;
+    try {
+        await saveSettings();
+        state.foldyLoreLayoutPersistedSignature = targetSignature;
+    } catch (error) {
+        console.warn('[로어북 매니저] Foldy 로어북 폴더 설정 즉시 저장에 실패했습니다.', error);
+    } finally {
+        state.foldyLoreLayoutSaveInFlight = false;
+        const latestSignature = getFoldyLoreLayoutSignature();
+        if (state.foldyLoreLayoutSaveQueued
+            || (latestSignature && latestSignature !== state.foldyLoreLayoutPersistedSignature)) {
+            state.foldyLoreLayoutSaveQueued = false;
+            void persistFoldyLoreLayoutIfChanged();
+        }
+    }
+}
+
+function isFoldyLoreMutation(entries, mutations) {
+    if (!entries?.classList.contains('foldy-lore-root')) return false;
+    return mutations.some(mutation => {
+        if (mutation.type !== 'childList') return false;
+        const target = mutation.target;
+        if (target instanceof Element && (
+            target === entries
+            || target.matches('.foldy-lore-folder, .foldy-lore-items')
+            || target.closest('.foldy-lore-folder, .foldy-lore-items')
+        )) return true;
+        return [...mutation.addedNodes, ...mutation.removedNodes].some(node => (
+            node instanceof Element
+            && (node.matches('.foldy-lore-folder, .foldy-lore-items, .world_entry')
+                || node.querySelector('.foldy-lore-folder, .foldy-lore-items, .world_entry'))
+        ));
+    });
 }
 
 function isWorldInfoDrawerOpen() {
@@ -2884,6 +2945,7 @@ function bindWorkspaceEntries(entries) {
         '.foldy-lore-entry-actions',
     ].join(',');
     state.observer = new MutationObserver(mutations => {
+        if (isFoldyLoreMutation(entries, mutations)) void persistFoldyLoreLayoutIfChanged();
         // 네이티브 드래그 정렬 중에는 jQuery UI가 헬퍼/플레이스홀더를 만들면서
         // 변이가 쏟아진다. 이때 enhance가 돌면 드래그 중인 DOM을 재구성해서
         // 정렬이 끊기므로 전부 무시하고, 드래그가 끝난 뒤 한 번에 갱신한다.
@@ -2935,6 +2997,7 @@ function bindWorkspaceEntries(entries) {
         .on('sortstop.slb', () => {
             state.sorting = false;
             state.navigatorDirty = true;
+            if (entries.classList.contains('foldy-lore-root')) void persistFoldyLoreLayoutIfChanged();
             scheduleEnhance();
         });
 
@@ -5170,6 +5233,7 @@ function init() {
     if (worldInfo.classList.contains('slb-active')) return;
 
     getSettings();
+    state.foldyLoreLayoutPersistedSignature = getFoldyLoreLayoutSignature();
     loadPersistedTokenCache();
     installEntryStateFilter();
     worldInfo.classList.add('slb-active');
