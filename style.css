@@ -657,8 +657,8 @@
     min-width: 0;
 }
 
-/* 로어북 전환 중 이전 책의 행이나 절반만 개조된 새 행을 화면에 노출하지
-   않는다. 목록은 백그라운드에서 완성하고 마지막 프레임에 한 번에 연다. */
+/* 로어북 전환 중 이전 책의 행은 숨긴다. 새 책의 네이티브 제목 행이
+   확인되는 즉시 이 상태를 해제하고 확장 UI는 이후 프레임에 나누어 붙인다. */
 #WorldInfo.slb-active.slb-book-switching #world_popup_entries_list {
     position: relative;
     box-sizing: border-box;

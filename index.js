@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.36';
+const VERSION = '1.4.37';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -88,6 +88,7 @@ const state = {
     bookSwitchRunId: 0,
     bookSwitch: null,
     tokenTimer: null,
+    tokenIdleHandle: null,
     tokenRenderTimer: null,
     tokenRunId: 0,
     tokenRefreshRunId: 0,
@@ -124,6 +125,7 @@ const state = {
     foldyLoreLayoutPersistedSignature: '',
     foldyLoreLayoutSaveInFlight: false,
     foldyLoreLayoutSaveQueued: false,
+    foldyDomMoveInProgress: false,
     googleTranslationQueue: Promise.resolve(),
 };
 
@@ -582,19 +584,32 @@ function closeFoldyFolderActionMenu(deleteButton) {
 }
 
 function unwrapFoldyLoreFolderInPlace(folderElement) {
-    if (!folderElement?.isConnected) return;
+    if (!folderElement?.isConnected) return [];
     const parent = folderElement.parentElement;
     const items = folderElement.querySelector(':scope > .foldy-lore-items, :scope > .foldy-folder-items');
     if (!parent || !items) {
         folderElement.remove();
-        return;
+        return [];
     }
 
     // 폴더 안의 기존 엔트리 DOM을 그대로 최상위로 옮긴다. 노드를 새로
     // 만들거나 world_refresh를 누르지 않으므로 로어북 드로어와 열린 상태,
     // 번역 UI 및 각 버튼의 기존 이벤트 리스너가 그대로 유지된다.
-    for (const entry of [...items.children]) parent.insertBefore(entry, folderElement);
+    const movedNodes = [...items.children];
+    for (const entry of movedNodes) parent.insertBefore(entry, folderElement);
     folderElement.remove();
+    return movedNodes.filter(node => node instanceof Element && node.matches('.world_entry'));
+}
+
+function refreshMovedFoldyEntries(entries) {
+    for (const entry of entries) {
+        if (!entry?.isConnected) continue;
+        enhanceEntryHeader(entry);
+        if (isEntryEditorRendered(entry)) enhanceEntry(entry);
+        placeResponsiveHeaderFields(entry);
+    }
+    state.navigatorDirty = true;
+    scheduleResponsiveEntryLayouts();
 }
 
 async function deleteFoldyLoreFolderOnly(deleteButton, drawerView) {
@@ -630,10 +645,6 @@ async function deleteFoldyLoreFolderOnly(deleteButton, drawerView) {
     restoreFoldyDrawerView(drawerView);
     if (!confirmed) return;
 
-    // 폴더 DOM을 풀어내는 순간 기존 헤더와 새 위치가 섞여 보이지 않도록
-    // 저장/재배치 시작 전에 목록 전체를 가린다. 배지·버튼도 함께 가려진다.
-    setBookSwitchLoading(true);
-
     const previousLayout = layout;
     const previousLayoutSignature = state.foldyLoreLayoutPersistedSignature;
     const root = [...layout.root];
@@ -655,17 +666,22 @@ async function deleteFoldyLoreFolderOnly(deleteButton, drawerView) {
         // 저장하지 않도록, 이번에 저장할 서명을 먼저 표시한다.
         state.foldyLoreLayoutPersistedSignature = getFoldyLoreLayoutSignature();
         const settingsSave = saveSettings();
-        unwrapFoldyLoreFolderInPlace(folderElement);
+        // 폴더 삭제는 로어북 데이터 전환이 아니라 기존 행의 부모만 바꾸는
+        // 작업이다. 전체 목록을 다시 숨기거나 enhanceAll을 돌리지 않고,
+        // 실제로 이동된 행만 다음 프레임에 정렬한다.
+        state.foldyDomMoveInProgress = true;
+        const movedEntries = unwrapFoldyLoreFolderInPlace(folderElement);
         restoreFoldyDrawerView(drawerView);
-        // 설정 저장과 화면 재구성을 병렬로 진행해 네트워크 저장을 기다리는
-        // 동안 UI가 놀지 않게 한다. 실제 로어북 데이터는 변경하지 않는다.
-        beginBookSwitch(book);
+        requestAnimationFrame(() => {
+            state.foldyDomMoveInProgress = false;
+            refreshMovedFoldyEntries(movedEntries);
+        });
         await settingsSave;
         notify(`“${folderName}” 폴더를 삭제하고 내부 항목을 최상위로 옮겼습니다.`, 'success');
     } catch (error) {
         lorebookLayouts[owner] = previousLayout;
         state.foldyLoreLayoutPersistedSignature = previousLayoutSignature;
-        setBookSwitchLoading(false);
+        state.foldyDomMoveInProgress = false;
         console.error('[로어북 매니저] Foldy 폴더만 삭제하는 작업에 실패했습니다.', error);
         notify('폴더 변경 저장에 실패했습니다. 새로고침하지 말고 다시 시도해주세요.', 'error');
     }
@@ -3189,6 +3205,13 @@ function bindWorkspaceEntries(entries) {
         '.foldy-lore-entry-actions',
     ].join(',');
     state.observer = new MutationObserver(mutations => {
+        if (state.foldyDomMoveInProgress) {
+            // 폴더 해제 중에는 같은 기존 행들이 부모만 연속해서 바뀐다.
+            // 각 이동마다 전체 목록을 다시 꾸미지 않고 작업 완료 뒤 이동된
+            // 행만 한 번 정리한다.
+            state.navigatorDirty = true;
+            return;
+        }
         if (isFoldyLoreMutation(entries, mutations)) void persistFoldyLoreLayoutIfChanged();
         if (state.bookSwitch && !state.bookSwitch.ready) {
             if (mutations.some(mutation => mutation.type === 'childList')) {
@@ -3808,9 +3831,13 @@ function bindEntryDrawerLifecycle(entry) {
             // 애니메이션으로 늦게 닫히는 경우를 위해 ST의 1초 지연 정리
             // (clearEntryList) 전에 두 번 더 재확인해 필드를 회수한다.
             entry.dataset.slbDrawerOpen = String(isEntryEditorRendered(entry));
+            // 접혀 있을 때는 제목 행만 유지하고, 실제 편집기가 화면에
+            // 나타난 순간에만 원문·번역·호출 조건 UI를 만든다.
+            if (isEntryEditorRendered(entry)) enhanceEntry(entry);
             placeResponsiveHeaderFields(entry);
         };
         syncFromRender();
+        requestAnimationFrame(syncFromRender);
         setTimeout(syncFromRender, 300);
         setTimeout(syncFromRender, 700);
     });
@@ -5248,8 +5275,8 @@ function syncLiveEditorTokens() {
         for (const timer of state.entryTokenTimers.values()) clearTimeout(timer);
         state.entryTokenTimers.clear();
         setTokenSummaryPending();
-        scheduleEnhance();
-        scheduleTokenSummary(null, 30);
+        beginBookSwitch(book);
+        scheduleInitialTokenSummary(null, 180);
         return;
     }
 
@@ -5370,7 +5397,41 @@ async function refreshTokenSummary(forcedData = null) {
 
 function scheduleTokenSummary(data = null, delay = 500) {
     clearTimeout(state.tokenTimer);
-    state.tokenTimer = setTimeout(() => refreshTokenSummary(data), delay);
+    if (state.tokenIdleHandle != null && typeof cancelIdleCallback === 'function') {
+        cancelIdleCallback(state.tokenIdleHandle);
+    }
+    state.tokenIdleHandle = null;
+    state.tokenTimer = setTimeout(() => {
+        state.tokenTimer = null;
+        void refreshTokenSummary(data);
+    }, delay);
+}
+
+function scheduleInitialTokenSummary(data = null, delay = 180) {
+    clearTimeout(state.tokenTimer);
+    if (state.tokenIdleHandle != null && typeof cancelIdleCallback === 'function') {
+        cancelIdleCallback(state.tokenIdleHandle);
+    }
+    state.tokenIdleHandle = null;
+    const expectedBook = currentBookName();
+    state.tokenTimer = setTimeout(() => {
+        state.tokenTimer = null;
+        const run = () => {
+            state.tokenTimer = null;
+            state.tokenIdleHandle = null;
+            if (currentBookName() !== expectedBook) return;
+            const readyData = data || (state.currentBook === expectedBook ? state.currentBookData : null);
+            void refreshTokenSummary(readyData);
+        };
+        // 첫 목록 표시와 제목 행 변환이 먼저 끝나도록 초기 전체 계산만
+        // 브라우저 유휴 시간으로 미룬다. 이후 편집 중 갱신은 기존의 짧은
+        // 디바운스를 그대로 사용하므로 토큰 표시 반응성은 바뀌지 않는다.
+        if (typeof requestIdleCallback === 'function') {
+            state.tokenIdleHandle = requestIdleCallback(run, { timeout: 2400 });
+        } else {
+            state.tokenTimer = setTimeout(run, 160);
+        }
+    }, delay);
 }
 
 function setBookSwitchLoading(active) {
@@ -5405,12 +5466,26 @@ function getRenderedEntryTitle(entry) {
     return control ? String(control.value ?? '') : null;
 }
 
+function getRenderedEntriesSignature() {
+    return renderedEntries().map(entry => (
+        `${getUid(entry)}\u0000${getRenderedEntryTitle(entry) ?? ''}`
+    )).join('\u0001');
+}
+
 function isCurrentBookDomReady(transition) {
     if (!transition || currentBookName() !== transition.book) return false;
     const entries = document.getElementById('world_popup_entries_list');
-    if (!entries || !transition.data?.entries) return false;
+    if (!entries) return false;
     const rows = renderedEntries();
     if (!rows.length) return Date.now() - transition.startedAt >= 220;
+
+    // 실리태번이 선택 변경 뒤 목록 노드를 교체했다면 확장 쪽 데이터 요청을
+    // 기다릴 필요가 없다. 기본 행이 이미 준비된 것이므로 즉시 표시한다.
+    const renderedSignature = getRenderedEntriesSignature();
+    const rowNodesChanged = rows.length !== transition.previousRows.length
+        || rows.some(row => !transition.previousRows.includes(row));
+    if (rowNodesChanged || renderedSignature !== transition.previousSignature) return true;
+    if (!transition.data?.entries) return false;
 
     return rows.every(row => {
         const uid = getUid(row);
@@ -5434,7 +5509,14 @@ function scheduleBookSwitchReadyCheck(delay = 32) {
         }
         transition.ready = true;
         state.navigatorDirty = true;
-        scheduleEnhance();
+        const book = transition.book;
+        // 새 책의 네이티브 제목 행이 확인되면 가림막부터 걷는다. 부가 헤더와
+        // 상세 편집기 변환은 다음 페인트 이후에 시작하여, 이전처럼 모든
+        // 확장 UI가 완성될 때까지 빈 목록을 보여주지 않는다.
+        finishBookSwitch(book);
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (currentBookName() === book) scheduleEnhance();
+        }));
     }, delay);
 }
 
@@ -5465,8 +5547,11 @@ function beginBookSwitch(book) {
         ready: false,
         timer: null,
         startedAt: Date.now(),
+        previousSignature: getRenderedEntriesSignature(),
+        previousRows: renderedEntries(),
     };
     state.bookSwitch = transition;
+    state.pendingBookSwitch = book;
     setBookSwitchLoading(true);
 
     Promise.resolve(loadWorldInfo(book))
@@ -5509,9 +5594,9 @@ function enhanceAll() {
     const entries = renderedEntries();
     const bookAtStart = currentBookName();
     const runId = ++state.enhanceRunId;
-    // 전환 중에는 목록 전체가 가려져 있어 각 행마다 레이아웃을 그릴 필요가
-    // 없다. 모바일은 한 프레임에 최대 12개(데스크톱 18개)를 처리하되
-    // 10ms를 넘기면 다음 프레임으로 양보해 긴 목록도 버벅이지 않게 한다.
+    // 네이티브 제목 행은 이미 보이는 상태다. 모바일은 한 프레임에 최대
+    // 12개(데스크톱 18개)를 처리하되 10ms를 넘기면 다음 프레임으로
+    // 양보하여 스크롤과 터치를 막지 않는다.
     const batchSize = isNarrowEntryLayout() ? 12 : 18;
     const batchBudgetMs = isNarrowEntryLayout() ? 10 : 12;
     state.enhancing = true;
@@ -5521,32 +5606,18 @@ function enhanceAll() {
         state.enhancing = false;
         state.enhanceChunkRaf = 0;
 
-        const transition = state.bookSwitch?.book === bookAtStart ? state.bookSwitch : null;
-        // enhancement 시작 뒤 네이티브 렌더러가 추가한 행도 반드시 확인한다.
-        // 캡처 당시의 배열만 검사하면 마지막 몇 개의 배지/버튼이 먼저 보일
-        // 수 있으므로, 가림막을 걷기 직전에 현재 행 전체를 다시 검사한다.
-        const incompleteEntry = transition && renderedEntries().some(entry => {
-            if (!entry?.isConnected) return false;
-            if (!entry.querySelector('.slb-entry-header-shell')) return true;
-            if (!isEntryEditorRendered(entry)) return false;
-            const edit = queryCompatible(entry, ['.world_entry_edit', '.world-entry-edit', '[data-role="entry-editor"]']);
-            return !hasCompleteEnhancedEditor(edit);
-        });
-        if (incompleteEntry && Date.now() - transition.startedAt < 4500) {
-            setTimeout(scheduleEnhance, 70);
-            return;
-        }
-
         syncResponsiveEntryLayouts();
         applyMobileDisplaySettings();
         syncFilterButtons();
         syncAutoControls();
-        finishBookSwitch(bookAtStart);
-
         // The editor can render its selected lorebook after this extension's first
         // token pass. Re-run once entries exist so the summary never stays at “—”.
-        if (entries.length && document.getElementById('slb-total-tokens')?.textContent === '—') {
-            scheduleTokenSummary(null, 450);
+        if (entries.length
+            && document.getElementById('slb-total-tokens')?.textContent === '—'
+            && !state.tokenTimer
+            && state.tokenIdleHandle == null
+            && !state.tokenRefreshRunId) {
+            scheduleInitialTokenSummary(null, 450);
         }
         if (state.enhancePending) {
             state.enhancePending = false;
@@ -5570,7 +5641,7 @@ function enhanceAll() {
             const entry = entries[index];
             if (!entry?.isConnected) continue;
             enhanceEntryHeader(entry);
-            enhanceEntry(entry);
+            if (isEntryEditorRendered(entry)) enhanceEntry(entry);
             if (index > start && performance.now() >= deadline) {
                 index += 1;
                 break;
@@ -5634,7 +5705,7 @@ function bindEvents() {
         beginBookSwitch(currentBookName());
         // 새 책의 네이티브 목록을 먼저 보여준 뒤 토크나이저를 시작한다.
         // 캐시가 있는 항목은 refreshTokenSummary 첫 렌더에서 즉시 표시된다.
-        scheduleTokenSummary(null, isNarrowEntryLayout() ? 700 : 420);
+        scheduleInitialTokenSummary(null, isNarrowEntryLayout() ? 520 : 300);
         // SillyTavern은 초기화·목록 갱신 때도 change를 프로그램으로 발생시킨다.
         // 실제 사용자 조작이 확인된 선택 변경만 열기 기준 백업으로 취급한다.
         if (event.isTrusted || Date.now() <= state.worldSelectUserIntentUntil) {
@@ -5741,7 +5812,7 @@ function init() {
     }
     applyMobileDisplaySettings();
     scheduleEnhance();
-    scheduleTokenSummary();
+    scheduleInitialTokenSummary();
     state.liveSyncTimer = setInterval(() => {
         enforceActivationOverviewIntegrity();
         refreshBadgeThemeColors();
