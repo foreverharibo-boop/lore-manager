@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.24';
+const VERSION = '1.4.25';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -113,6 +113,8 @@ const state = {
     responsiveMedia: null,
     responsiveObserver: null,
     responsiveRaf: 0,
+    foldyDeleteGuardTimer: null,
+    foldyDeleteGuardRunId: 0,
     googleTranslationQueue: Promise.resolve(),
 };
 
@@ -429,6 +431,95 @@ function currentBookName() {
     const option = select?.selectedOptions?.[0];
     const name = option && option.value !== '' ? option.textContent.trim() : '';
     return name;
+}
+
+function isWorldInfoDrawerOpen() {
+    const panel = document.getElementById('WorldInfo');
+    return Boolean(panel?.classList.contains('openDrawer')
+        && !panel.classList.contains('closedDrawer'));
+}
+
+function isFoldyFolderDeleteButton(target) {
+    if (!(target instanceof Element)) return false;
+    const button = target.closest('.foldy-folder-actions .caution, .foldy-folder-actions [title="폴더 삭제"]');
+    if (!button) return false;
+
+    const list = document.getElementById('world_popup_entries_list');
+    if (!list?.classList.contains('foldy-lore-root')) return false;
+
+    const actions = button.closest('.foldy-folder-actions');
+    const homeParent = actions?.__foldyHomeParent;
+    return Boolean(actions?.closest('.foldy-lore-folder')
+        || homeParent?.closest?.('.foldy-lore-folder'));
+}
+
+function isFoldyDeleteConfirmationOpen() {
+    return Array.from(document.querySelectorAll('dialog.popup[open], .popup[open]'))
+        .some(popup => popup.querySelector('.foldy-confirm-message'));
+}
+
+// Foldy의 폴더 작업 메뉴는 목록 밖으로 포털 렌더된다. 일부 SillyTavern
+// 테마/기기에서는 그 삭제 버튼을 "드로어 바깥 클릭"으로 판단해 열린
+// 월드 인포 창까지 닫는다. 폴더 삭제를 시작할 때 창이 열려 있었던 경우에만
+// 확인창과 직후 재렌더 구간을 보호한다. 일반적인 사용자 닫기에는 개입하지 않는다.
+function armFoldyFolderDeleteDrawerGuard(event) {
+    if (!isFoldyFolderDeleteButton(event.target) || !isWorldInfoDrawerOpen()) return;
+
+    clearTimeout(state.foldyDeleteGuardTimer);
+    const runId = ++state.foldyDeleteGuardRunId;
+    const book = currentBookName();
+    const panel = document.getElementById('WorldInfo');
+    const scrollTop = panel?.scrollTop ?? 0;
+    const startedAt = Date.now();
+    let confirmationSeen = false;
+    let confirmationClosedAt = 0;
+    let restorePendingUntil = 0;
+
+    const finish = () => {
+        if (runId !== state.foldyDeleteGuardRunId) return;
+        clearTimeout(state.foldyDeleteGuardTimer);
+        state.foldyDeleteGuardTimer = null;
+    };
+
+    const protect = () => {
+        if (runId !== state.foldyDeleteGuardRunId) return;
+        const now = Date.now();
+        if (currentBookName() !== book || now - startedAt > 60000) {
+            finish();
+            return;
+        }
+
+        const confirmationOpen = isFoldyDeleteConfirmationOpen();
+        if (confirmationOpen) confirmationSeen = true;
+        if (confirmationSeen && !confirmationOpen && !confirmationClosedAt) {
+            confirmationClosedAt = now;
+        }
+
+        const waitingForConfirmation = !confirmationSeen && now - startedAt < 1500;
+        const afterConfirmation = Boolean(confirmationClosedAt && now - confirmationClosedAt < 3000);
+        const protectionActive = confirmationOpen || waitingForConfirmation || afterConfirmation;
+
+        if (protectionActive && !isWorldInfoDrawerOpen() && now >= restorePendingUntil) {
+            const toggle = document.querySelector('#WI-SP-button > .drawer-toggle');
+            if (toggle) {
+                restorePendingUntil = now + 500;
+                toggle.click();
+                requestAnimationFrame(() => {
+                    const currentPanel = document.getElementById('WorldInfo');
+                    if (currentPanel) currentPanel.scrollTop = scrollTop;
+                });
+            }
+        }
+
+        if ((!confirmationSeen && !waitingForConfirmation)
+            || (confirmationClosedAt && !afterConfirmation)) {
+            finish();
+            return;
+        }
+        state.foldyDeleteGuardTimer = setTimeout(protect, 100);
+    };
+
+    state.foldyDeleteGuardTimer = setTimeout(protect, 0);
 }
 
 function getUid(entry) {
@@ -4988,6 +5079,8 @@ function scheduleEnhance() {
 
 function bindEvents() {
     const worldSelect = document.getElementById('world_editor_select');
+    document.addEventListener('pointerdown', armFoldyFolderDeleteDrawerGuard, true);
+    document.addEventListener('click', armFoldyFolderDeleteDrawerGuard, true);
     const markWorldSelectionIntent = () => {
         state.worldSelectUserIntentUntil = Date.now() + 4000;
     };
