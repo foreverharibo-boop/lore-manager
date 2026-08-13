@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.37';
+const VERSION = '1.4.38';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -126,8 +126,39 @@ const state = {
     foldyLoreLayoutSaveInFlight: false,
     foldyLoreLayoutSaveQueued: false,
     foldyDomMoveInProgress: false,
+    foldyLayoutSettleRaf: 0,
+    foldyRevealPending: false,
     googleTranslationQueue: Promise.resolve(),
 };
+
+function beginFoldyLayoutSettle(entries) {
+    if (!entries?.isConnected) return;
+
+    // Foldy rebuilds the lorebook list asynchronously. During that transaction
+    // an entry can briefly exist inside its new folder before its native title
+    // header has been restored. Hide only those entry rows until Foldy finishes,
+    // then let the lore manager enhance the completed DOM once.
+    entries.classList.add('slb-foldy-settling');
+    if (state.foldyLayoutSettleRaf) return;
+
+    const waitForFoldy = () => {
+        state.foldyLayoutSettleRaf = 0;
+        if (!entries.isConnected || document.getElementById('world_popup_entries_list') !== entries) {
+            entries.classList.remove('slb-foldy-settling');
+            return;
+        }
+        if (entries.classList.contains('foldy-lore-pending')) {
+            state.foldyLayoutSettleRaf = requestAnimationFrame(waitForFoldy);
+            return;
+        }
+
+        state.foldyRevealPending = true;
+        state.navigatorDirty = true;
+        scheduleEnhance();
+    };
+
+    state.foldyLayoutSettleRaf = requestAnimationFrame(waitForFoldy);
+}
 
 function ensureCriticalLayoutStyles() {
     const styleId = 'slb-critical-layout-1-4-7';
@@ -3205,6 +3236,11 @@ function bindWorkspaceEntries(entries) {
         '.foldy-lore-entry-actions',
     ].join(',');
     state.observer = new MutationObserver(mutations => {
+        if (entries.classList.contains('foldy-lore-pending')) {
+            beginFoldyLayoutSettle(entries);
+            state.navigatorDirty = true;
+            return;
+        }
         if (state.foldyDomMoveInProgress) {
             // 폴더 해제 중에는 같은 기존 행들이 부모만 연속해서 바뀐다.
             // 각 이동마다 전체 목록을 다시 꾸미지 않고 작업 완료 뒤 이동된
@@ -5586,6 +5622,11 @@ function finishBookSwitch(book) {
 
 function enhanceAll() {
     if (state.sorting || state.enhancing) return;
+    const liveEntryList = document.getElementById('world_popup_entries_list');
+    if (liveEntryList?.classList.contains('foldy-lore-pending')) {
+        beginFoldyLayoutSettle(liveEntryList);
+        return;
+    }
     ensureCriticalLayoutStyles();
     createAIBar();
     createBulkLorebookExportControls();
@@ -5619,9 +5660,19 @@ function enhanceAll() {
             && !state.tokenRefreshRunId) {
             scheduleInitialTokenSummary(null, 450);
         }
-        if (state.enhancePending) {
+        const needsAnotherEnhancePass = state.enhancePending;
+        if (needsAnotherEnhancePass) {
             state.enhancePending = false;
             scheduleEnhance();
+        }
+        if (state.foldyRevealPending && !needsAnotherEnhancePass) {
+            state.foldyRevealPending = false;
+            requestAnimationFrame(() => {
+                const currentEntries = document.getElementById('world_popup_entries_list');
+                if (!currentEntries?.classList.contains('foldy-lore-pending')) {
+                    currentEntries?.classList.remove('slb-foldy-settling');
+                }
+            });
         }
     };
 

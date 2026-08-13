@@ -4220,3 +4220,9 @@
     grid-column: 4 !important;
     grid-row: 1 !important;
 }
+
+/* v1.4.38 — Foldy 폴더 생성·재배치 중 미완성 중첩 행이 한 프레임 노출되는 현상 방지 */
+#WorldInfo.slb-active #world_popup_entries_list.foldy-lore-pending .world_entry,
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-settling .world_entry {
+    visibility: hidden !important;
+}
