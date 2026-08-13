@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.28';
+const VERSION = '1.4.29';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -525,6 +525,39 @@ function getFoldyFolderFromActionButton(button) {
         || null;
 }
 
+function closeFoldyFolderActionMenu(deleteButton) {
+    const actions = deleteButton?.closest?.('.foldy-folder-actions');
+    if (!actions) return;
+
+    const home = actions.__foldyHomeParent;
+    const next = actions.__foldyHomeNext;
+    actions.classList.remove('foldy-folder-actions-portal');
+    actions.style.removeProperty('top');
+    actions.style.removeProperty('left');
+    actions.style.removeProperty('max-width');
+    home?.closest?.('.foldy-lore-folder')?.classList.remove('is-actions-open');
+    home?.querySelector?.('.foldy-folder-more')?.setAttribute('aria-expanded', 'false');
+    if (home?.isConnected) home.insertBefore(actions, next?.parentNode === home ? next : null);
+    actions.__foldyHomeParent = null;
+    actions.__foldyHomeNext = null;
+}
+
+function unwrapFoldyLoreFolderInPlace(folderElement) {
+    if (!folderElement?.isConnected) return;
+    const parent = folderElement.parentElement;
+    const items = folderElement.querySelector(':scope > .foldy-lore-items, :scope > .foldy-folder-items');
+    if (!parent || !items) {
+        folderElement.remove();
+        return;
+    }
+
+    // 폴더 안의 기존 엔트리 DOM을 그대로 최상위로 옮긴다. 노드를 새로
+    // 만들거나 world_refresh를 누르지 않으므로 로어북 드로어와 열린 상태,
+    // 번역 UI 및 각 버튼의 기존 이벤트 리스너가 그대로 유지된다.
+    for (const entry of [...items.children]) parent.insertBefore(entry, folderElement);
+    folderElement.remove();
+}
+
 async function deleteFoldyLoreFolderOnly(deleteButton) {
     const folderElement = getFoldyFolderFromActionButton(deleteButton);
     const folderId = folderElement?.dataset?.foldyId;
@@ -552,9 +585,11 @@ async function deleteFoldyLoreFolderOnly(deleteButton) {
     }
 
     const folderName = String(folder.name || folderElement.querySelector('.foldy-folder-name')?.textContent || '이름 없는 폴더').trim();
+    closeFoldyFolderActionMenu(deleteButton);
     const confirmed = window.confirm(`“${folderName}” 폴더만 삭제하고 안의 로어북 항목 ${folder.items?.length || 0}개를 최상위로 옮길까요?\n\n로어북 항목과 내용은 삭제되지 않습니다.`);
     if (!confirmed) return;
 
+    const previousLayout = layout;
     const root = [...layout.root];
     root.splice(rootIndex, 1, ...(folder.items || []).map(id => ({ type: 'item', id })));
     lorebookLayouts[owner] = {
@@ -572,9 +607,11 @@ async function deleteFoldyLoreFolderOnly(deleteButton) {
     try {
         await saveSettings();
         state.foldyLoreLayoutPersistedSignature = getFoldyLoreLayoutSignature();
-        document.getElementById('world_refresh')?.click();
+        unwrapFoldyLoreFolderInPlace(folderElement);
+        scheduleEnhance();
         notify(`“${folderName}” 폴더를 삭제하고 내부 항목을 최상위로 옮겼습니다.`, 'success');
     } catch (error) {
+        lorebookLayouts[owner] = previousLayout;
         console.error('[로어북 매니저] Foldy 폴더만 삭제하는 작업에 실패했습니다.', error);
         notify('폴더 변경 저장에 실패했습니다. 새로고침하지 말고 다시 시도해주세요.', 'error');
     }
