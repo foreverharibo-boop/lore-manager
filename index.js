@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.33';
+const VERSION = '1.4.34';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -81,6 +81,10 @@ const state = {
     workspaceObserver: null,
     workspaceObserverTarget: null,
     refreshTimer: null,
+    enhancing: false,
+    enhancePending: false,
+    enhanceRunId: 0,
+    enhanceChunkRaf: 0,
     tokenTimer: null,
     tokenRenderTimer: null,
     tokenRunId: 0,
@@ -106,6 +110,7 @@ const state = {
     headerRecoveryAttempts: new WeakMap(),
     backupTimers: new Map(),
     backupOpenPromises: new Map(),
+    backupOpenSchedules: new Map(),
     backupRestoreInProgress: false,
     backupRenderRunId: 0,
     extensionDataCleaning: false,
@@ -482,13 +487,11 @@ function isFoldyLoreMutation(entries, mutations) {
         const target = mutation.target;
         if (target instanceof Element && (
             target === entries
-            || target.matches('.foldy-lore-folder, .foldy-lore-items')
-            || target.closest('.foldy-lore-folder, .foldy-lore-items')
+            || target.matches('.foldy-lore-root, .foldy-lore-items, .foldy-folder-items')
         )) return true;
         return [...mutation.addedNodes, ...mutation.removedNodes].some(node => (
             node instanceof Element
-            && (node.matches('.foldy-lore-folder, .foldy-lore-items, .world_entry')
-                || node.querySelector('.foldy-lore-folder, .foldy-lore-items, .world_entry'))
+            && node.matches('.foldy-lore-folder, .foldy-lore-items, .foldy-folder-items, .world_entry')
         ));
     });
 }
@@ -2069,6 +2072,7 @@ function clearAutomaticBackupSchedule(book) {
 
 function clearAllAutomaticBackupSchedules() {
     for (const book of Array.from(state.backupTimers.keys())) clearAutomaticBackupSchedule(book);
+    cancelScheduledLorebookOpenBackup();
 }
 
 async function runScheduledAutomaticBackup(book, expectedSchedule) {
@@ -2113,7 +2117,7 @@ async function backupLorebookOnOpen(book) {
     const task = createLorebookBackup(book, { reason: 'opened' });
     state.backupOpenPromises.set(book, task);
     try {
-        // 열기 기준본은 수정 예약과 별도로 즉시 확보한다. 동일한 내용은
+        // 열기 기준본은 수정 예약과 별도로 확보한다. 동일한 내용은
         // createLorebookBackup의 해시 비교에서 걸러지므로 중복 사본은 생기지 않는다.
         await task;
     } catch (error) {
@@ -2121,6 +2125,43 @@ async function backupLorebookOnOpen(book) {
     } finally {
         if (state.backupOpenPromises.get(book) === task) state.backupOpenPromises.delete(book);
     }
+}
+
+function cancelScheduledLorebookOpenBackup(book = null) {
+    const targets = book
+        ? [[book, state.backupOpenSchedules.get(book)]]
+        : Array.from(state.backupOpenSchedules.entries());
+    for (const [targetBook, schedule] of targets) {
+        if (!schedule) continue;
+        clearTimeout(schedule.timer);
+        if (schedule.idleHandle != null && typeof cancelIdleCallback === 'function') {
+            cancelIdleCallback(schedule.idleHandle);
+        }
+        state.backupOpenSchedules.delete(targetBook);
+    }
+}
+
+function scheduleLorebookOpenBackup(book, delay = 700) {
+    if (!book || !getSettings().autoBackupEnabled || state.backupRestoreInProgress) return;
+    if (state.backupOpenSchedules.has(book)) return;
+
+    const schedule = { book, timer: null, idleHandle: null };
+    state.backupOpenSchedules.set(book, schedule);
+    schedule.timer = setTimeout(() => {
+        const run = () => {
+            if (state.backupOpenSchedules.get(book) !== schedule) return;
+            state.backupOpenSchedules.delete(book);
+            void backupLorebookOnOpen(book);
+        };
+        // 열기 기준 백업은 그대로 남기되 첫 화면 구성·항목 클릭·스크롤을
+        // 가로막지 않도록 브라우저가 한가해진 뒤 시작한다. iOS Safari처럼
+        // requestIdleCallback이 없는 환경도 짧은 타이머로 동일하게 양보한다.
+        if (typeof requestIdleCallback === 'function') {
+            schedule.idleHandle = requestIdleCallback(run, { timeout: 2200 });
+        } else {
+            schedule.timer = setTimeout(run, 120);
+        }
+    }, delay);
 }
 
 function safeBackupFilename(value) {
@@ -3139,6 +3180,17 @@ function bindWorkspaceEntries(entries) {
         // 변이가 쏟아진다. 이때 enhance가 돌면 드래그 중인 DOM을 재구성해서
         // 정렬이 끊기므로 전부 무시하고, 드래그가 끝난 뒤 한 번에 갱신한다.
         if (state.sorting) return;
+        if (state.enhancing) {
+            const nativeRenderArrived = mutations.some(mutation => (
+                [...mutation.addedNodes].some(node => (
+                    node instanceof Element
+                    && (node.matches('.world_entry, .world_entry_edit, .world-entry-edit')
+                        || node.querySelector('.world_entry, .world_entry_edit, .world-entry-edit'))
+                ))
+            ));
+            if (nativeRenderArrived) state.enhancePending = true;
+            return;
+        }
         let listChanged = false;
         let entryChanged = false;
         for (const mutation of mutations) {
@@ -5265,10 +5317,16 @@ async function refreshTokenSummary(forcedData = null) {
         state.tokenRefreshRunId = runId;
         // 모바일 WebView에서 토크나이저 8개 동시 실행은 메인 스레드를 오래
         // 점유한다. 화면 크기에 맞춰 작은 작업 묶음으로 양보한다.
-        const tokenConcurrency = isNarrowEntryLayout() ? 2 : 4;
-        await mapLimit(staleEntries, tokenConcurrency, async entry => {
+        const tokenConcurrency = isNarrowEntryLayout() ? 1 : 3;
+        await mapLimit(staleEntries, tokenConcurrency, async (entry, index) => {
+            if (runId !== state.tokenRunId || currentBookName() !== book) return;
+            // 긴 로어북에서도 입력과 스크롤이 먼저 처리되도록 토큰 작업 사이에
+            // 메인 스레드를 돌려준다. 계산 결과와 캐시 형식은 바뀌지 않는다.
+            if (index > 0) await new Promise(resolve => setTimeout(resolve, 0));
+            if (runId !== state.tokenRunId || currentBookName() !== book) return;
             const contentHash = hashText(entry.content);
             const count = Number(await getTokenCountAsync(entry.content)) || 0;
+            if (runId !== state.tokenRunId || currentBookName() !== book) return;
             const latest = data.entries?.[entry.uid] ?? data.entries?.[Number(entry.uid)];
             if (latest && hashText(latest.content) === contentHash) {
                 cache.set(String(entry.uid), { hash: contentHash, count });
@@ -5296,30 +5354,69 @@ function scheduleTokenSummary(data = null, delay = 500) {
 }
 
 function enhanceAll() {
-    if (state.sorting) return;
+    if (state.sorting || state.enhancing) return;
     ensureCriticalLayoutStyles();
     createAIBar();
     createBulkLorebookExportControls();
     createWorkspace();
     hideNativeHeaderRows();
     const entries = renderedEntries();
-    entries.forEach(entry => {
-        enhanceEntryHeader(entry);
-        enhanceEntry(entry);
-    });
-    syncResponsiveEntryLayouts();
-    applyMobileDisplaySettings();
-    syncFilterButtons();
-    syncAutoControls();
+    const bookAtStart = currentBookName();
+    const runId = ++state.enhanceRunId;
+    const batchSize = isNarrowEntryLayout() ? 3 : 6;
+    state.enhancing = true;
 
-    // The editor can render its selected lorebook after this extension's first
-    // token pass. Re-run once entries exist so the summary never stays at “—”.
-    if (entries.length && document.getElementById('slb-total-tokens')?.textContent === '—') {
-        scheduleTokenSummary(null, 150);
-    }
+    const finish = () => {
+        if (runId !== state.enhanceRunId) return;
+        state.enhancing = false;
+        state.enhanceChunkRaf = 0;
+        syncResponsiveEntryLayouts();
+        applyMobileDisplaySettings();
+        syncFilterButtons();
+        syncAutoControls();
+
+        // The editor can render its selected lorebook after this extension's first
+        // token pass. Re-run once entries exist so the summary never stays at “—”.
+        if (entries.length && document.getElementById('slb-total-tokens')?.textContent === '—') {
+            scheduleTokenSummary(null, 450);
+        }
+        if (state.enhancePending) {
+            state.enhancePending = false;
+            scheduleEnhance();
+        }
+    };
+
+    const enhanceBatch = start => {
+        if (runId !== state.enhanceRunId) return;
+        if (currentBookName() !== bookAtStart) {
+            state.enhancing = false;
+            state.enhanceChunkRaf = 0;
+            state.enhancePending = false;
+            scheduleEnhance();
+            return;
+        }
+        const end = Math.min(entries.length, start + batchSize);
+        for (let index = start; index < end; index++) {
+            const entry = entries[index];
+            if (!entry?.isConnected) continue;
+            enhanceEntryHeader(entry);
+            enhanceEntry(entry);
+        }
+        if (end < entries.length) {
+            state.enhanceChunkRaf = requestAnimationFrame(() => enhanceBatch(end));
+        } else {
+            finish();
+        }
+    };
+
+    enhanceBatch(0);
 }
 
 function scheduleEnhance() {
+    if (state.enhancing) {
+        state.enhancePending = true;
+        return;
+    }
     if (state.refreshTimer) cancelAnimationFrame(state.refreshTimer);
     // 네이티브 행이 먼저 한 프레임 그려지는 깜빡임을 막으면서 같은 렌더
     // 묶음의 DOM 변이는 한 번만 처리한다.
@@ -5357,19 +5454,21 @@ function bindEvents() {
         state.entryTokenTimers.clear();
         setTokenSummaryPending();
         scheduleEnhance();
-        scheduleTokenSummary(null, 30);
+        // 새 책의 네이티브 목록을 먼저 보여준 뒤 토크나이저를 시작한다.
+        // 캐시가 있는 항목은 refreshTokenSummary 첫 렌더에서 즉시 표시된다.
+        scheduleTokenSummary(null, isNarrowEntryLayout() ? 700 : 420);
         // SillyTavern은 초기화·목록 갱신 때도 change를 프로그램으로 발생시킨다.
         // 실제 사용자 조작이 확인된 선택 변경만 열기 기준 백업으로 취급한다.
         if (event.isTrusted || Date.now() <= state.worldSelectUserIntentUntil) {
             state.worldSelectUserIntentUntil = 0;
-            backupLorebookOnOpen(currentBookName());
+            scheduleLorebookOpenBackup(currentBookName(), isNarrowEntryLayout() ? 900 : 650);
         }
     });
     document.querySelector('#WI-SP-button > .drawer-toggle')?.addEventListener('click', () => {
         setTimeout(() => {
             const panel = document.getElementById('WorldInfo');
             if (panel && !panel.classList.contains('closedDrawer')) {
-                backupLorebookOnOpen(currentBookName());
+                scheduleLorebookOpenBackup(currentBookName(), isNarrowEntryLayout() ? 900 : 650);
             }
         }, 0);
     });
