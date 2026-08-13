@@ -671,6 +671,8 @@
 
 #WorldInfo.slb-active.slb-book-switching #world_popup_entries_list > * {
     visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
 }
 
 #WorldInfo.slb-active.slb-book-switching #world_popup_entries_list::before {

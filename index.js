@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.35';
+const VERSION = '1.4.36';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -630,7 +630,12 @@ async function deleteFoldyLoreFolderOnly(deleteButton, drawerView) {
     restoreFoldyDrawerView(drawerView);
     if (!confirmed) return;
 
+    // 폴더 DOM을 풀어내는 순간 기존 헤더와 새 위치가 섞여 보이지 않도록
+    // 저장/재배치 시작 전에 목록 전체를 가린다. 배지·버튼도 함께 가려진다.
+    setBookSwitchLoading(true);
+
     const previousLayout = layout;
+    const previousLayoutSignature = state.foldyLoreLayoutPersistedSignature;
     const root = [...layout.root];
     root.splice(rootIndex, 1, ...(folder.items || []).map(id => ({ type: 'item', id })));
     lorebookLayouts[owner] = {
@@ -646,14 +651,21 @@ async function deleteFoldyLoreFolderOnly(deleteButton, drawerView) {
     }
 
     try {
-        await saveSettings();
+        // 아래 DOM 이동으로 발생하는 Foldy observer가 같은 설정을 한 번 더
+        // 저장하지 않도록, 이번에 저장할 서명을 먼저 표시한다.
         state.foldyLoreLayoutPersistedSignature = getFoldyLoreLayoutSignature();
+        const settingsSave = saveSettings();
         unwrapFoldyLoreFolderInPlace(folderElement);
         restoreFoldyDrawerView(drawerView);
-        scheduleEnhance();
+        // 설정 저장과 화면 재구성을 병렬로 진행해 네트워크 저장을 기다리는
+        // 동안 UI가 놀지 않게 한다. 실제 로어북 데이터는 변경하지 않는다.
+        beginBookSwitch(book);
+        await settingsSave;
         notify(`“${folderName}” 폴더를 삭제하고 내부 항목을 최상위로 옮겼습니다.`, 'success');
     } catch (error) {
         lorebookLayouts[owner] = previousLayout;
+        state.foldyLoreLayoutPersistedSignature = previousLayoutSignature;
+        setBookSwitchLoading(false);
         console.error('[로어북 매니저] Foldy 폴더만 삭제하는 작업에 실패했습니다.', error);
         notify('폴더 변경 저장에 실패했습니다. 새로고침하지 말고 다시 시도해주세요.', 'error');
     }
@@ -5370,6 +5382,19 @@ function setBookSwitchLoading(active) {
 }
 
 function getRenderedEntryTitle(entry) {
+    // 전환 확인은 목록이 만들어지는 동안 여러 번 실행된다. 일반적인
+    // SillyTavern 구조는 먼저 한 번의 직접 탐색으로 끝내고, 버전/테마가
+    // 다른 경우에만 비용이 큰 구조 기반 호환 탐색을 사용한다.
+    const direct = queryCompatible(entry, [
+        '[name="comment"]',
+        '[name="entryComment"]',
+        '[name="memo"]',
+        'textarea.WIEntryTitle',
+        'textarea.world_entry_comment',
+        'textarea.entry-title',
+    ]);
+    if (direct) return String(direct.value ?? '');
+
     const control = findCompatibleControl(entry, {
         names: ['comment', 'entryComment', 'memo'],
         classes: ['textarea.WIEntryTitle', 'textarea.world_entry_comment', 'textarea.entry-title'],
@@ -5396,7 +5421,7 @@ function isCurrentBookDomReady(transition) {
     });
 }
 
-function scheduleBookSwitchReadyCheck(delay = 70) {
+function scheduleBookSwitchReadyCheck(delay = 32) {
     const transition = state.bookSwitch;
     if (!transition || transition.ready) return;
     clearTimeout(transition.timer);
@@ -5404,7 +5429,7 @@ function scheduleBookSwitchReadyCheck(delay = 70) {
         if (state.bookSwitch !== transition || currentBookName() !== transition.book) return;
         const elapsed = Date.now() - transition.startedAt;
         if (!isCurrentBookDomReady(transition) && elapsed < 4500) {
-            scheduleBookSwitchReadyCheck(80);
+            scheduleBookSwitchReadyCheck(40);
             return;
         }
         transition.ready = true;
@@ -5452,14 +5477,14 @@ function beginBookSwitch(book) {
                 state.currentBook = book;
                 state.currentBookData = data;
             }
-            scheduleBookSwitchReadyCheck(50);
+            scheduleBookSwitchReadyCheck(24);
         })
         .catch(error => {
             console.warn('[로어북 매니저] 전환 화면 확인용 로어북 로드 실패', error);
             if (state.bookSwitch !== transition) return;
             scheduleBookSwitchReadyCheck(120);
         });
-    scheduleBookSwitchReadyCheck(90);
+    scheduleBookSwitchReadyCheck(40);
 }
 
 function finishBookSwitch(book) {
@@ -5484,7 +5509,11 @@ function enhanceAll() {
     const entries = renderedEntries();
     const bookAtStart = currentBookName();
     const runId = ++state.enhanceRunId;
-    const batchSize = isNarrowEntryLayout() ? 3 : 6;
+    // 전환 중에는 목록 전체가 가려져 있어 각 행마다 레이아웃을 그릴 필요가
+    // 없다. 모바일은 한 프레임에 최대 12개(데스크톱 18개)를 처리하되
+    // 10ms를 넘기면 다음 프레임으로 양보해 긴 목록도 버벅이지 않게 한다.
+    const batchSize = isNarrowEntryLayout() ? 12 : 18;
+    const batchBudgetMs = isNarrowEntryLayout() ? 10 : 12;
     state.enhancing = true;
 
     const finish = () => {
@@ -5493,7 +5522,10 @@ function enhanceAll() {
         state.enhanceChunkRaf = 0;
 
         const transition = state.bookSwitch?.book === bookAtStart ? state.bookSwitch : null;
-        const incompleteEntry = transition && entries.some(entry => {
+        // enhancement 시작 뒤 네이티브 렌더러가 추가한 행도 반드시 확인한다.
+        // 캡처 당시의 배열만 검사하면 마지막 몇 개의 배지/버튼이 먼저 보일
+        // 수 있으므로, 가림막을 걷기 직전에 현재 행 전체를 다시 검사한다.
+        const incompleteEntry = transition && renderedEntries().some(entry => {
             if (!entry?.isConnected) return false;
             if (!entry.querySelector('.slb-entry-header-shell')) return true;
             if (!isEntryEditorRendered(entry)) return false;
@@ -5531,15 +5563,21 @@ function enhanceAll() {
             scheduleEnhance();
             return;
         }
-        const end = Math.min(entries.length, start + batchSize);
-        for (let index = start; index < end; index++) {
+        const deadline = performance.now() + batchBudgetMs;
+        let index = start;
+        const hardEnd = Math.min(entries.length, start + batchSize);
+        for (; index < hardEnd; index++) {
             const entry = entries[index];
             if (!entry?.isConnected) continue;
             enhanceEntryHeader(entry);
             enhanceEntry(entry);
+            if (index > start && performance.now() >= deadline) {
+                index += 1;
+                break;
+            }
         }
-        if (end < entries.length) {
-            state.enhanceChunkRaf = requestAnimationFrame(() => enhanceBatch(end));
+        if (index < entries.length) {
+            state.enhanceChunkRaf = requestAnimationFrame(() => enhanceBatch(index));
         } else {
             finish();
         }
