@@ -12,11 +12,17 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.23';
+const VERSION = '1.4.24';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
-const ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)';
+// Foldy keeps native SillyTavern entries intact but nests folder members under
+// `.foldy-lore-items`. Match both native root entries and exactly those nested
+// members without moving, cloning, or rewriting any Foldy-owned DOM.
+const ENTRY_SELECTOR = [
+    '#world_popup_entries_list > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)',
+    '#world_popup_entries_list .foldy-lore-items > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)',
+].join(', ');
 const FULL_HEADER_FIELDS_MIN_WIDTH = 580;
 const HEADER_LAYOUT_SAFETY_GAP = 24;
 const GOOGLE_TRANSLATE_CHUNK_LIMIT = 2200;
@@ -2784,6 +2790,7 @@ function bindWorkspaceEntries(entries) {
         '.WIEntryTitleAndStatus',
         '.WIEntryTitleStatus',
         '.drag-handle',
+        '.foldy-lore-entry-actions',
     ].join(',');
     state.observer = new MutationObserver(mutations => {
         // 네이티브 드래그 정렬 중에는 jQuery UI가 헬퍼/플레이스홀더를 만들면서
@@ -2955,12 +2962,23 @@ function syncEntryHeaderActions(entry) {
     const header = entry?.querySelector('.inline-drawer-header.slb-entry-header');
     const actions = header?.querySelector('.slb-header-actions');
     if (!header || !actions) return;
+    // Foldy wraps its folder-move button and SillyTavern's native action
+    // buttons in a direct `.foldy-lore-entry-actions` child before the manager
+    // enhances the header. Flatten only that wrapper into our existing action
+    // area so every original button and listener survives, while Foldy's
+    // folder model and renderer remain untouched.
+    const foldyWrappers = Array.from(header.children).filter(child => (
+        child !== actions
+        && child.classList?.contains('foldy-lore-entry-actions')
+    ));
+    const foldyActions = foldyWrappers.flatMap(wrapper => Array.from(wrapper.children));
     const orphanActions = Array.from(header.children).filter(child => (
         child !== actions
         && child.classList?.contains('menu_button')
     ));
-    actions.append(...orphanActions);
-    if (orphanActions.length) scheduleResponsiveEntryLayouts();
+    actions.append(...foldyActions, ...orphanActions);
+    foldyWrappers.forEach(wrapper => wrapper.remove());
+    if (foldyActions.length || orphanActions.length) scheduleResponsiveEntryLayouts();
 }
 
 function observeResponsiveHeader(entry) {
@@ -3225,6 +3243,7 @@ function enhanceEntryHeader(entry) {
     thinControls?.remove();
 
     entry.dataset.slbHeaderEnhanced = VERSION;
+    syncEntryHeaderActions(entry);
     syncMobileEntryStateBadge(entry);
     observeResponsiveHeader(entry);
     placeResponsiveHeaderFields(entry);
@@ -3641,6 +3660,11 @@ async function commitNavigatorOrder() {
     const navList = document.getElementById('slb-nav-list');
     const entriesList = document.getElementById('world_popup_entries_list');
     if (!navList || !entriesList) return;
+
+    // Foldy owns the tree order while its folder renderer is active. Appending
+    // nested entries to the root here would silently pull them out of folders,
+    // so leave reordering entirely to Foldy's native sortables in this mode.
+    if (entriesList.classList.contains('foldy-lore-root')) return;
 
     const orderedUids = Array.from(navList.querySelectorAll('.slb-nav-item')).map(item => String(item.dataset.uid));
     const elements = new Map(renderedEntries().map(element => [getUid(element), element]));

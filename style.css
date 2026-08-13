@@ -661,6 +661,13 @@
     margin: 0 0 8px;
 }
 
+/* Foldy compatibility: folder members are native lorebook entries nested one
+   level deeper. Keep the manager's row spacing without touching Foldy's
+   folder containers or controls. */
+#WorldInfo.slb-active #world_popup_entries_list .foldy-lore-items > .world_entry {
+    margin: 0 0 8px;
+}
+
 /* The native desktop header is a single fixed-width row, so it drifts away
    from fields when the extension changes the editor width. Each field gets
    its own label instead. */
@@ -2004,6 +2011,10 @@
 /* v1.3.18 — evenly distributed compact activation controls and readable exclude */
 @media (max-width: 760px) {
     #WorldInfo.slb-active #world_popup_entries_list > .world_entry {
+        margin-bottom: 5px;
+    }
+
+    #WorldInfo.slb-active #world_popup_entries_list .foldy-lore-items > .world_entry {
         margin-bottom: 5px;
     }
 
