@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.31';
+const VERSION = '1.4.32';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -113,9 +113,6 @@ const state = {
     responsiveMedia: null,
     responsiveObserver: null,
     responsiveRaf: 0,
-    foldyDeleteGuardTimer: null,
-    foldyDeleteGuardStopTimer: null,
-    foldyDeleteGuardRunId: 0,
     foldyDeleteSafetyRunId: 0,
     foldyLoreLayoutPersistedSignature: '',
     foldyLoreLayoutSaveInFlight: false,
@@ -496,80 +493,6 @@ function isFoldyLoreMutation(entries, mutations) {
     });
 }
 
-function isWorldInfoDrawerOpen() {
-    const panel = document.getElementById('WorldInfo');
-    return Boolean(panel?.classList.contains('openDrawer')
-        && !panel.classList.contains('closedDrawer'));
-}
-
-function forceWorldInfoDrawerOpen(scrollTop = null) {
-    const panel = document.getElementById('WorldInfo');
-    if (!panel) return false;
-
-    // 이미 정상적으로 열려 있으면 DOM 속성을 단 한 번도 다시 쓰지 않는다.
-    // 클래스 변경 감시와 복구가 서로를 호출하는 반복을 원천 차단한다.
-    if (isWorldInfoDrawerOpen()
-        && !panel.hidden
-        && panel.style.display !== 'none'
-        && panel.style.height !== '0px') return true;
-
-    // Foldy의 포털 메뉴를 닫는 클릭이 일부 테마에서 월드 인포의 바깥
-    // 클릭으로도 처리된다. 이 경로에서는 토글을 다시 클릭하지 않고
-    // SillyTavern 드로어의 실제 상태 클래스만 열림으로 되돌린다. 토글
-    // 클릭은 같은 바깥 클릭 처리와 다시 경합할 수 있기 때문이다.
-    if (panel.hidden) panel.hidden = false;
-    if (panel.style.display === 'none') panel.style.removeProperty('display');
-    if (panel.style.height === '0px') panel.style.removeProperty('height');
-    panel.classList.remove('closedDrawer');
-    panel.classList.add('openDrawer');
-
-    const icon = document.getElementById('WIDrawerIcon');
-    icon?.classList.remove('closedIcon');
-    icon?.classList.add('openIcon');
-
-    if (Number.isFinite(scrollTop)) {
-        requestAnimationFrame(() => {
-            const current = document.getElementById('WorldInfo');
-            if (current) current.scrollTop = scrollTop;
-        });
-    }
-    return true;
-}
-
-function beginFoldyFolderDeleteDrawerLease() {
-    const panel = document.getElementById('WorldInfo');
-    if (!panel) return 0;
-
-    const runId = ++state.foldyDeleteGuardRunId;
-    const scrollTop = panel.scrollTop;
-    clearInterval(state.foldyDeleteGuardTimer);
-    clearTimeout(state.foldyDeleteGuardStopTimer);
-
-    const enforce = () => {
-        if (runId !== state.foldyDeleteGuardRunId) return;
-        if (!isWorldInfoDrawerOpen()) forceWorldInfoDrawerOpen(scrollTop);
-    };
-
-    // DOM 변경 감시는 복구 작업 자체를 다시 감지할 수 있으므로 사용하지
-    // 않는다. 삭제 작업 중에만 저빈도 확인을 수행하고, 실제로 닫혔을
-    // 때에만 한 번 복구한다.
-    state.foldyDeleteGuardTimer = setInterval(enforce, 160);
-    state.foldyDeleteGuardStopTimer = setTimeout(() => endFoldyFolderDeleteDrawerLease(runId, 0), 10000);
-    return runId;
-}
-
-function endFoldyFolderDeleteDrawerLease(runId, delay = 900) {
-    if (!runId || runId !== state.foldyDeleteGuardRunId) return;
-    clearTimeout(state.foldyDeleteGuardStopTimer);
-    state.foldyDeleteGuardStopTimer = setTimeout(() => {
-        if (runId !== state.foldyDeleteGuardRunId) return;
-        if (!isWorldInfoDrawerOpen()) forceWorldInfoDrawerOpen();
-        clearInterval(state.foldyDeleteGuardTimer);
-        state.foldyDeleteGuardTimer = null;
-        state.foldyDeleteGuardStopTimer = null;
-    }, Math.max(0, delay));
-}
-
 function getFoldyFolderDeleteButton(target) {
     if (!(target instanceof Element)) return null;
     const button = target.closest('.foldy-folder-actions .caution, .foldy-folder-actions [title="폴더 삭제"]');
@@ -780,19 +703,18 @@ function armFoldyFolderDeleteDrawerGuard(event) {
     // 위의 폴더 전용 삭제 경로만 실행한다.
     deleteButton.classList.remove('delete_entry_button');
 
-    if (event.type === 'pointerdown') {
-        beginFoldyFolderDeleteDrawerLease();
-        event.stopImmediatePropagation();
-        return;
-    }
-
-    event.preventDefault();
+    // window 캡처 단계는 document/버튼 리스너보다 먼저 실행된다. 여기서
+    // 이벤트 전파를 끊으면 포털 메뉴 클릭을 "드로어 바깥 클릭"으로 보는
+    // SillyTavern 경로와 Foldy의 네이티브 엔트리 삭제 경로가 아예 실행되지
+    // 않는다. 닫힌 창을 반복 감시·복구할 필요가 없어 삭제도 매끄럽다.
+    if (event.type === 'click') event.preventDefault();
     event.stopImmediatePropagation();
-    const runId = state.foldyDeleteGuardTimer
-        ? state.foldyDeleteGuardRunId
-        : beginFoldyFolderDeleteDrawerLease();
+    event.stopPropagation();
+    if (event.type !== 'click' || deleteButton.dataset.slbFolderDeletePending === 'true') return;
+
+    deleteButton.dataset.slbFolderDeletePending = 'true';
     void deleteFoldyLoreFolderOnly(deleteButton)
-        .finally(() => endFoldyFolderDeleteDrawerLease(runId));
+        .finally(() => delete deleteButton.dataset.slbFolderDeletePending);
 }
 
 function getUid(entry) {
@@ -5354,8 +5276,8 @@ function scheduleEnhance() {
 
 function bindEvents() {
     const worldSelect = document.getElementById('world_editor_select');
-    document.addEventListener('pointerdown', armFoldyFolderDeleteDrawerGuard, true);
-    document.addEventListener('click', armFoldyFolderDeleteDrawerGuard, true);
+    window.addEventListener('pointerdown', armFoldyFolderDeleteDrawerGuard, true);
+    window.addEventListener('click', armFoldyFolderDeleteDrawerGuard, true);
     const markWorldSelectionIntent = () => {
         state.worldSelectUserIntentUntil = Date.now() + 4000;
     };
