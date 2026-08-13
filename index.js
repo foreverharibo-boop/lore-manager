@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.41';
+const VERSION = '1.4.42';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -127,15 +127,37 @@ const state = {
     foldyDeleteSafetyRunId: 0,
     foldyLoreLayoutPersistedSignature: '',
     foldyLoreLayoutSaveInFlight: false,
+    foldyLoreLayoutSavePromise: null,
     foldyLoreLayoutSaveQueued: false,
     foldyDomMoveInProgress: false,
     foldyLayoutSettleRaf: 0,
     foldyLayoutSettleTimer: null,
     foldyRevealPending: false,
+    foldyFolderOperationUntil: 0,
+    foldyDeletePersistenceTimers: new Map(),
     googleTranslationQueue: Promise.resolve(),
 };
 
-function beginFoldyLayoutSettle(entries) {
+function hasUnpersistedFoldyLoreLayout() {
+    const signature = getFoldyLoreLayoutSignature();
+    return Boolean(signature && signature !== state.foldyLoreLayoutPersistedSignature);
+}
+
+function markFoldyFolderOperation(entries = document.getElementById('world_popup_entries_list'), duration = 5000) {
+    state.foldyFolderOperationUntil = Math.max(state.foldyFolderOperationUntil, Date.now() + duration);
+    entries?.classList.add('slb-foldy-folder-operation');
+}
+
+function isFoldyFolderOperationActive() {
+    return Date.now() <= state.foldyFolderOperationUntil || hasUnpersistedFoldyLoreLayout();
+}
+
+function clearFoldyFolderOperation(entries) {
+    state.foldyFolderOperationUntil = 0;
+    entries?.classList.remove('slb-foldy-folder-operation');
+}
+
+function beginFoldyLayoutSettle(entries, folderOperation = false) {
     if (!entries?.isConnected) return;
 
     // Foldy rebuilds the lorebook list asynchronously. During that transaction
@@ -143,6 +165,9 @@ function beginFoldyLayoutSettle(entries) {
     // header has been restored. Mask the whole list (not individual children,
     // whose !important visibility rules can pierce a hidden parent), then let
     // the lore manager enhance the completed DOM once.
+    if (folderOperation || isFoldyFolderOperationActive()) {
+        markFoldyFolderOperation(entries);
+    }
     entries.classList.add('slb-foldy-settling');
     if (state.foldyLayoutSettleRaf) cancelAnimationFrame(state.foldyLayoutSettleRaf);
     if (state.foldyLayoutSettleTimer) clearTimeout(state.foldyLayoutSettleTimer);
@@ -151,6 +176,7 @@ function beginFoldyLayoutSettle(entries) {
         state.foldyLayoutSettleRaf = 0;
         if (!entries.isConnected || document.getElementById('world_popup_entries_list') !== entries) {
             entries.classList.remove('slb-foldy-settling');
+            clearFoldyFolderOperation(entries);
             return;
         }
         if (entries.classList.contains('foldy-lore-pending')) {
@@ -462,7 +488,7 @@ function scheduleMobileEntryStateBadgeRepair(entry) {
     requestAnimationFrame(() => repairMobileEntryStateBadge(entry));
 }
 
-function applyMobileDisplaySettings() {
+function applyMobileDisplaySettings(syncEntries = true) {
     const worldInfo = document.getElementById('WorldInfo');
     if (!worldInfo) return;
     const settings = getSettings();
@@ -472,7 +498,10 @@ function applyMobileDisplaySettings() {
     worldInfo.classList.toggle('slb-mobile-entry-state-enabled', settings.showMobileEntryState);
     worldInfo.classList.toggle('slb-mobile-token-summary-hidden', !settings.showMobileTokenSummary);
     worldInfo.classList.toggle('slb-mobile-entry-filters-hidden', !settings.showMobileEntryFilters);
-    renderedEntries().forEach(syncMobileEntryStateBadge);
+    // 첫 로어북 화면을 구성하는 동안에는 enhanceEntryHeader가 각 항목의
+    // 배지를 바로 완성한다. 여기서 원시 항목 전체를 먼저 한 번 더 훑으면
+    // 긴 로어북의 첫 표시만 늦어지므로, 전역 클래스만 적용할 수 있게 한다.
+    if (syncEntries) renderedEntries().forEach(syncMobileEntryStateBadge);
 }
 
 function notify(message, type = 'info') {
@@ -505,30 +534,113 @@ function getFoldyLoreLayoutSignature() {
 // 예약한다. 그 짧은 틈에 새로고침하면 화면에는 생성된 폴더가 서버 설정에
 // 아직 기록되지 않아 사라질 수 있다. Foldy의 저장 모델은 건드리지 않고,
 // 실제 로어북 폴더 레이아웃 값이 달라졌을 때만 ST 설정 저장을 즉시 확정한다.
-async function persistFoldyLoreLayoutIfChanged() {
+async function persistFoldyLoreLayoutIfChanged(force = false) {
     const signature = getFoldyLoreLayoutSignature();
-    if (!signature || signature === state.foldyLoreLayoutPersistedSignature) return;
+    if (!signature || (!force && signature === state.foldyLoreLayoutPersistedSignature)) return true;
     if (state.foldyLoreLayoutSaveInFlight) {
         state.foldyLoreLayoutSaveQueued = true;
-        return;
+        try {
+            await state.foldyLoreLayoutSavePromise;
+        } catch {
+            // The active owner reports its own error and clears the in-flight flag.
+        }
+        await Promise.resolve();
+        return persistFoldyLoreLayoutIfChanged(force);
     }
 
     state.foldyLoreLayoutSaveInFlight = true;
     const targetSignature = signature;
+    let saved = false;
+    const savePromise = Promise.resolve(saveSettings());
+    state.foldyLoreLayoutSavePromise = savePromise;
     try {
-        await saveSettings();
+        await savePromise;
         state.foldyLoreLayoutPersistedSignature = targetSignature;
+        saved = true;
     } catch (error) {
         console.warn('[로어북 매니저] Foldy 로어북 폴더 설정 즉시 저장에 실패했습니다.', error);
     } finally {
         state.foldyLoreLayoutSaveInFlight = false;
+        state.foldyLoreLayoutSavePromise = null;
         const latestSignature = getFoldyLoreLayoutSignature();
-        if (state.foldyLoreLayoutSaveQueued
-            || (latestSignature && latestSignature !== state.foldyLoreLayoutPersistedSignature)) {
-            state.foldyLoreLayoutSaveQueued = false;
-            void persistFoldyLoreLayoutIfChanged();
+        const queued = state.foldyLoreLayoutSaveQueued;
+        state.foldyLoreLayoutSaveQueued = false;
+        // 저장 중 실제 레이아웃이 한 번 더 바뀐 경우에만 최신 상태를 이어서
+        // 저장한다. 단순 네트워크 실패를 무한 재시도 루프로 만들지 않는다.
+        if ((queued || (saved && latestSignature !== targetSignature))
+            && latestSignature
+            && latestSignature !== state.foldyLoreLayoutPersistedSignature) {
+            return persistFoldyLoreLayoutIfChanged();
         }
     }
+    return saved;
+}
+
+function foldyIdsEqual(left, right) {
+    return String(left ?? '') === String(right ?? '');
+}
+
+function removeFoldyFolderFromStoredLayout(owner, folderId) {
+    const lorebookLayouts = extension_settings?.foldy?.layouts?.lorebooks;
+    const layout = lorebookLayouts?.[owner];
+    if (!layout || typeof layout !== 'object') return null;
+
+    if (!Array.isArray(layout.root)) layout.root = [];
+    if (!Array.isArray(layout.folders)) layout.folders = [];
+    const folderIndex = layout.folders.findIndex(folder => foldyIdsEqual(folder?.id, folderId));
+    if (folderIndex < 0) return null;
+
+    const folder = layout.folders[folderIndex];
+    const itemIds = Array.isArray(folder?.items) ? [...folder.items] : [];
+    const rootIndex = layout.root.findIndex(node => node?.type === 'folder' && foldyIdsEqual(node?.id, folderId));
+
+    // 배열과 레이아웃 객체를 교체하지 않고 제자리에서 수정한다. Foldy가
+    // 같은 객체/배열 참조를 들고 지연 저장하더라도 삭제 전 구조를 다시
+    // 덮어쓸 수 없게 하는 핵심이다.
+    if (rootIndex >= 0) {
+        layout.root.splice(rootIndex, 1, ...itemIds.map(id => ({ type: 'item', id })));
+    }
+    layout.folders.splice(folderIndex, 1);
+
+    const collapsedLore = extension_settings?.foldy?.collapsed?.lore;
+    const collapsed = collapsedLore?.[owner];
+    if (Array.isArray(collapsed)) {
+        for (let index = collapsed.length - 1; index >= 0; index--) {
+            if (foldyIdsEqual(collapsed[index], folderId)) collapsed.splice(index, 1);
+        }
+    }
+
+    return { folder, itemIds, rootIndex };
+}
+
+function scheduleDeletedFoldyFolderPersistenceCheck(owner, folderId) {
+    const key = `${owner}\u241f${folderId}`;
+    const previous = state.foldyDeletePersistenceTimers.get(key) || [];
+    previous.forEach(clearTimeout);
+
+    const verify = async () => {
+        const removedAgain = removeFoldyFolderFromStoredLayout(owner, folderId);
+        if (removedAgain) markFoldyFolderOperation(undefined, 1800);
+        // 이전 Foldy 저장 요청이 삭제 전 설정을 이미 서버로 보내고 있었으면
+        // 로컬 메모리에는 폴더가 안 살아나도 서버 응답 순서만 뒤집힐 수 있다.
+        // 그래서 두 확인 시점에는 현재 최신 설정을 무조건 한 번 더 기록한다.
+        const saved = await persistFoldyLoreLayoutIfChanged(true);
+        if (!saved && hasUnpersistedFoldyLoreLayout()) {
+            // 다른 Foldy 저장과 겹쳤다면 persist 함수의 큐가 최신 메모리
+            // 구조를 다시 저장한다. 여기서는 사용자에게 실패 토스트를
+            // 중복으로 띄우지 않고 콘솔에만 남긴다.
+            console.warn('[로어북 매니저] 되살아난 Foldy 폴더 삭제를 저장 큐에서 다시 확정합니다.');
+        }
+    };
+
+    // Foldy 쪽에 이미 예약된 짧은 디바운스 저장과 일반 1초 저장이 모두
+    // 끝나는 두 지점에서 최신 설정을 확정한다. 로컬 구조가 되살아난 경우엔
+    // 새 폴더나 다른 이동은 건드리지 않고 같은 ID의 삭제 폴더만 제거한다.
+    const timers = [250, 1400].map(delay => setTimeout(() => {
+        void verify();
+        if (delay === 1400) state.foldyDeletePersistenceTimers.delete(key);
+    }, delay));
+    state.foldyDeletePersistenceTimers.set(key, timers);
 }
 
 function isFoldyLoreMutation(entries, mutations) {
@@ -545,6 +657,28 @@ function isFoldyLoreMutation(entries, mutations) {
             && node.matches('.foldy-lore-folder, .foldy-lore-items, .foldy-folder-items, .world_entry')
         ));
     });
+}
+
+function isFoldyFolderInteractionTarget(target) {
+    if (!(target instanceof Element)) return false;
+    const list = document.getElementById('world_popup_entries_list');
+    if (!list?.classList.contains('foldy-lore-root')) return false;
+
+    if (target.closest('.foldy-folder-actions, .foldy-folder-more, .foldy-lore-entry-actions')) return true;
+    const folder = target.closest('.foldy-lore-folder');
+    if (folder && !target.closest('.world_entry, .foldy-lore-items, .foldy-folder-items')) return true;
+
+    const control = target.closest('button, [role="button"], .menu_button');
+    if (!control) return false;
+    const label = [control.textContent, control.getAttribute('title'), control.getAttribute('aria-label')]
+        .filter(Boolean)
+        .join(' ');
+    return label.includes('폴더') && Boolean(control.closest('#WorldInfo, #world_popup, .foldy-folder-actions'));
+}
+
+function markFoldyFolderOperationIntent(event) {
+    if (!isFoldyFolderInteractionTarget(event.target)) return;
+    markFoldyFolderOperation();
 }
 
 function captureFoldyDrawerView() {
@@ -673,13 +807,13 @@ async function deleteFoldyLoreFolderOnly(deleteButton, drawerView) {
     // 구버전의 name:로어북명 키도 함께 찾는다. DOM에 표시된 폴더 ID로
     // 최종 대체 탐색하여 Foldy 버전 차이에도 실제 폴더 레이아웃만 수정한다.
     const preferredOwners = [JSON.stringify(['name', book]), `name:${book}`];
-    let owner = preferredOwners.find(key => lorebookLayouts[key]?.folders?.some(folder => folder?.id === folderId));
+    let owner = preferredOwners.find(key => lorebookLayouts[key]?.folders?.some(folder => foldyIdsEqual(folder?.id, folderId)));
     if (!owner) {
-        owner = Object.keys(lorebookLayouts).find(key => lorebookLayouts[key]?.folders?.some(folder => folder?.id === folderId));
+        owner = Object.keys(lorebookLayouts).find(key => lorebookLayouts[key]?.folders?.some(folder => foldyIdsEqual(folder?.id, folderId)));
     }
     const layout = owner ? lorebookLayouts[owner] : null;
-    const folder = layout?.folders?.find(value => value?.id === folderId);
-    const rootIndex = layout?.root?.findIndex(node => node?.type === 'folder' && node?.id === folderId) ?? -1;
+    const folder = layout?.folders?.find(value => foldyIdsEqual(value?.id, folderId));
+    const rootIndex = layout?.root?.findIndex(node => node?.type === 'folder' && foldyIdsEqual(node?.id, folderId)) ?? -1;
     if (!folder || rootIndex < 0) {
         notify('삭제할 폴더의 저장 정보를 찾지 못했습니다. 로어북을 새로고침한 뒤 다시 시도해주세요.', 'error');
         return;
@@ -690,29 +824,30 @@ async function deleteFoldyLoreFolderOnly(deleteButton, drawerView) {
     restoreFoldyDrawerView(drawerView);
     const confirmed = window.confirm(`“${folderName}” 폴더만 삭제하고 안의 로어북 항목 ${folder.items?.length || 0}개를 최상위로 옮길까요?\n\n로어북 항목과 내용은 삭제되지 않습니다.`);
     restoreFoldyDrawerView(drawerView);
-    if (!confirmed) return;
-
-    const previousLayout = layout;
-    const previousLayoutSignature = state.foldyLoreLayoutPersistedSignature;
-    const root = [...layout.root];
-    root.splice(rootIndex, 1, ...(folder.items || []).map(id => ({ type: 'item', id })));
-    lorebookLayouts[owner] = {
-        ...layout,
-        root,
-        folders: layout.folders.filter(value => value?.id !== folderId),
-    };
-
-    const collapsedLore = extension_settings?.foldy?.collapsed?.lore;
-    if (Array.isArray(collapsedLore?.[owner])) {
-        collapsedLore[owner] = collapsedLore[owner].filter(id => id !== folderId);
-        if (!collapsedLore[owner].length) delete collapsedLore[owner];
+    if (!confirmed) {
+        clearFoldyFolderOperation(document.getElementById('world_popup_entries_list'));
+        return;
     }
 
+    const previousRoot = structuredClone(layout.root);
+    const previousFolders = structuredClone(layout.folders);
+    const collapsedLore = extension_settings?.foldy?.collapsed?.lore;
+    const previousCollapsed = Array.isArray(collapsedLore?.[owner])
+        ? structuredClone(collapsedLore[owner])
+        : null;
+    const previousLayoutSignature = state.foldyLoreLayoutPersistedSignature;
+    const removedFolder = removeFoldyFolderFromStoredLayout(owner, folderId);
+    if (!removedFolder) {
+        notify('폴더 저장 정보를 갱신하지 못했습니다. 로어북을 새로고침한 뒤 다시 시도해주세요.', 'error');
+        return;
+    }
+    const targetSignature = getFoldyLoreLayoutSignature();
+    markFoldyFolderOperation(undefined, 10000);
+
     try {
-        // 아래 DOM 이동으로 발생하는 Foldy observer가 같은 설정을 한 번 더
-        // 저장하지 않도록, 이번에 저장할 서명을 먼저 표시한다.
-        state.foldyLoreLayoutPersistedSignature = getFoldyLoreLayoutSignature();
-        const settingsSave = saveSettings();
+        // 메모리 변경 직후 서버 설정 저장을 먼저 시작한다. DOM 정리와 동시에
+        // 진행하되, 완료 확인 전에는 성공 토스트를 띄우지 않는다.
+        const settingsSave = persistFoldyLoreLayoutIfChanged();
         // 폴더 삭제는 로어북 데이터 전환이 아니라 기존 행의 부모만 바꾸는
         // 작업이다. 전체 목록을 다시 숨기거나 enhanceAll을 돌리지 않고,
         // 실제로 이동된 행만 다음 프레임에 정렬한다.
@@ -723,12 +858,30 @@ async function deleteFoldyLoreFolderOnly(deleteButton, drawerView) {
             state.foldyDomMoveInProgress = false;
             refreshMovedFoldyEntries(movedEntries);
         });
-        await settingsSave;
+        const saved = await settingsSave;
+        if (!saved || state.foldyLoreLayoutPersistedSignature !== targetSignature) {
+            throw new Error('Foldy 폴더 설정 저장이 완료되지 않았습니다.');
+        }
+        // Foldy에 삭제 전 구조를 저장하는 예약 작업이 남아 있어도 같은 ID의
+        // 폴더만 다시 제거·저장한다. 새 폴더나 이후 항목 이동은 보존한다.
+        scheduleDeletedFoldyFolderPersistenceCheck(owner, folderId);
+        clearFoldyFolderOperation(document.getElementById('world_popup_entries_list'));
         notify(`“${folderName}” 폴더를 삭제하고 내부 항목을 최상위로 옮겼습니다.`, 'success');
     } catch (error) {
-        lorebookLayouts[owner] = previousLayout;
+        if (Array.isArray(layout.root)) layout.root.splice(0, layout.root.length, ...previousRoot);
+        else layout.root = previousRoot;
+        if (Array.isArray(layout.folders)) layout.folders.splice(0, layout.folders.length, ...previousFolders);
+        else layout.folders = previousFolders;
+        if (collapsedLore && previousCollapsed) {
+            if (Array.isArray(collapsedLore[owner])) {
+                collapsedLore[owner].splice(0, collapsedLore[owner].length, ...previousCollapsed);
+            } else {
+                collapsedLore[owner] = previousCollapsed;
+            }
+        }
         state.foldyLoreLayoutPersistedSignature = previousLayoutSignature;
         state.foldyDomMoveInProgress = false;
+        clearFoldyFolderOperation(document.getElementById('world_popup_entries_list'));
         console.error('[로어북 매니저] Foldy 폴더만 삭제하는 작업에 실패했습니다.', error);
         notify('폴더 변경 저장에 실패했습니다. 새로고침하지 말고 다시 시도해주세요.', 'error');
     }
@@ -3014,7 +3167,7 @@ function createAIBar() {
         }
     });
     syncQuickTranslationOptionsPlacement();
-    applyMobileDisplaySettings();
+    applyMobileDisplaySettings(false);
     renderBackupList();
 }
 
@@ -3253,7 +3406,7 @@ function bindWorkspaceEntries(entries) {
     ].join(',');
     state.observer = new MutationObserver(mutations => {
         if (entries.classList.contains('foldy-lore-pending')) {
-            beginFoldyLayoutSettle(entries);
+            beginFoldyLayoutSettle(entries, isFoldyFolderOperationActive());
             state.navigatorDirty = true;
             return;
         }
@@ -3266,7 +3419,7 @@ function bindWorkspaceEntries(entries) {
         }
         const foldyMutation = isFoldyLoreMutation(entries, mutations);
         if (foldyMutation) {
-            beginFoldyLayoutSettle(entries);
+            beginFoldyLayoutSettle(entries, isFoldyFolderOperationActive());
             void persistFoldyLoreLayoutIfChanged();
         }
         if (state.bookSwitch && !state.bookSwitch.ready) {
@@ -3335,6 +3488,7 @@ function bindWorkspaceEntries(entries) {
         .off('sortstart.slb sortstop.slb')
         .on('sortstart.slb', () => {
             state.sorting = true;
+            if (entries.classList.contains('foldy-lore-root')) markFoldyFolderOperation(entries);
         })
         .on('sortstop.slb', () => {
             state.sorting = false;
@@ -3420,7 +3574,7 @@ function createWorkspace() {
     bindWorkspacePopupObserver(popup);
     syncQuickTranslationOptionsPlacement();
     syncFilterButtons();
-    applyMobileDisplaySettings();
+    applyMobileDisplaySettings(false);
 }
 
 function installEntryStateFilter() {
@@ -3596,7 +3750,7 @@ function restoreNativeDragHandle(header, toggles) {
     return handle;
 }
 
-function enhanceEntryHeader(entry) {
+function enhanceEntryHeader(entry, forceCompact = false) {
     if (!entry) return;
     bindEntryDrawerLifecycle(entry);
     // 버전 문자열이 달라도(업데이트 직후, 과거 중복 설치 잔재) 구조가
@@ -3742,7 +3896,7 @@ function enhanceEntryHeader(entry) {
     syncEntryHeaderActions(entry);
     syncMobileEntryStateBadge(entry);
     observeResponsiveHeader(entry);
-    placeResponsiveHeaderFields(entry);
+    placeResponsiveHeaderFields(entry, forceCompact);
 }
 
 function entryData(uid) {
@@ -4065,8 +4219,11 @@ function placeResponsiveHeaderFields(entry, forceCompact = false) {
     const activationActive = entry.dataset.slbActiveTab === 'activation' || Boolean(activationPanel
         ?.classList.contains('is-active'));
     // 패널이 렌더되어 있으면 드로어는 확실히 열려 있다. 아이콘/표식 판정은
-    // 보조 신호로만 쓴다.
-    const drawerOpen = panelVisible || isEntryDrawerStablyOpen(entry);
+    // 보조 신호로만 쓴다. 접힌 기본 목록이나 다른 탭에서는 결과를 쓰지
+    // 않으므로 비싼 drawer 탐색/getComputedStyle도 실행하지 않는다.
+    const drawerOpen = activationActive
+        ? (panelVisible || isEntryDrawerStablyOpen(entry))
+        : false;
     // 좁은 화면에서도 호출 조건 탭을 보고 있을 때만 editOutlet 내부로
     // 이동한다. 그 외에는 삭제되지 않는 헤더 stash에 안전하게 보관한다.
     const target = compact
@@ -5382,6 +5539,31 @@ function syncLiveEditorTokens() {
     if (activeChanged) renderTokenSummary(book, data);
 }
 
+function loadCurrentBookDataOnce(book) {
+    if (!book) return Promise.resolve(null);
+    if (state.currentBook === book && state.currentBookData?.entries) {
+        return Promise.resolve(state.currentBookData);
+    }
+    if (state.bookDataHydration?.book === book && state.bookDataHydration.promise) {
+        return state.bookDataHydration.promise;
+    }
+
+    const hydration = { book, promise: null };
+    hydration.promise = Promise.resolve(loadWorldInfo(book))
+        .then(data => {
+            if (currentBookName() === book && data?.entries) {
+                state.currentBook = book;
+                state.currentBookData = data;
+            }
+            return data;
+        })
+        .finally(() => {
+            if (state.bookDataHydration === hydration) state.bookDataHydration = null;
+        });
+    state.bookDataHydration = hydration;
+    return hydration.promise;
+}
+
 async function refreshTokenSummary(forcedData = null) {
     const book = currentBookName();
     const runId = ++state.tokenRunId;
@@ -5405,7 +5587,9 @@ async function refreshTokenSummary(forcedData = null) {
     }
 
     try {
-        const data = forcedData || await loadWorldInfo(book);
+        // 목록 공개 직후 데이터 동기화와 토큰 계산이 같은 로어북을 동시에
+        // 요청하지 않도록 하나의 진행 중 요청을 공유한다.
+        const data = forcedData || await loadCurrentBookDataOnce(book);
         if (currentBookName() !== book) return;
         if (!data?.entries) return;
         state.currentBook = book;
@@ -5480,8 +5664,18 @@ function scheduleInitialTokenSummary(data = null, delay = 180) {
             if (currentBookName() !== expectedBook) return;
             // 실리태번이 아직 새 로어북을 받는 중이면 동일 데이터를 다시
             // 요청하지 않는다. 목록이 완성된 뒤 캐시된 데이터로 계산한다.
-            if (state.bookSwitch?.book === expectedBook && !state.bookSwitch.ready) {
-                state.tokenTimer = setTimeout(run, 100);
+            const entriesList = document.getElementById('world_popup_entries_list');
+            const listStillPreparing = Boolean(
+                state.enhancing
+                || state.worldDrawerOpening
+                || state.foldyRevealPending
+                || state.bookSwitch?.book === expectedBook
+                || document.getElementById('WorldInfo')?.classList.contains('slb-book-switching')
+                || entriesList?.classList.contains('foldy-lore-pending')
+                || entriesList?.classList.contains('slb-foldy-settling')
+            );
+            if (listStillPreparing) {
+                state.tokenTimer = setTimeout(run, 60);
                 return;
             }
             const readyData = data || (state.currentBook === expectedBook ? state.currentBookData : null);
@@ -5555,22 +5749,13 @@ function finishWorldDrawerOpenLoading() {
 function hydrateCurrentBookDataAfterReveal(book) {
     if (!book || currentBookName() !== book) return;
     if (state.currentBook === book && state.currentBookData?.entries) return;
-    if (state.bookDataHydration?.book === book) return;
-
-    const hydration = { book };
-    state.bookDataHydration = hydration;
-    Promise.resolve(loadWorldInfo(book))
+    void loadCurrentBookDataOnce(book)
         .then(data => {
-            if (state.bookDataHydration !== hydration || currentBookName() !== book) return;
-            if (data?.entries) {
-                state.currentBook = book;
-                state.currentBookData = data;
-                renderTokenSummary(book, data);
-            }
+            if (currentBookName() !== book || !data?.entries) return;
+            renderTokenSummary(book, data);
         })
         .catch(error => console.warn('[로어북 매니저] 로어북 데이터 동기화 실패', error))
         .finally(() => {
-            if (state.bookDataHydration === hydration) state.bookDataHydration = null;
             // 데이터 동기화가 실패해도 다음 기본 동기화 주기가 다시 시도할 수
             // 있도록 전환 표식을 영구히 붙잡아 두지 않는다.
             if (currentBookName() === book && state.currentBook !== book) {
@@ -5722,6 +5907,7 @@ function revealCompletedEntryList(book, entries) {
         if (!currentEntries?.classList.contains('foldy-lore-pending')) {
             state.foldyRevealPending = false;
             currentEntries?.classList.remove('slb-foldy-settling');
+            clearFoldyFolderOperation(currentEntries);
         }
     }
     finishWorldDrawerOpenLoading();
@@ -5745,11 +5931,12 @@ function enhanceAll() {
     const entries = renderedEntries();
     const bookAtStart = currentBookName();
     const runId = ++state.enhanceRunId;
-    // 네이티브 제목 행은 로딩 가림막 뒤에 있다. 현재 페이지(보통 25개)는
-    // 가능하면 한 프레임에 끝내고, 처리 시간이 길어질 때만 다음 프레임으로
-    // 양보하여 스크롤과 터치를 막지 않는다.
-    const batchSize = isNarrowEntryLayout() ? 25 : 40;
-    const batchBudgetMs = isNarrowEntryLayout() ? 32 : 40;
+    // 좁은 화면 여부를 항목마다 다시 측정하지 않고 현재 목록에서 한 번만
+    // 결정한다. 헤더 묶음도 조금 크게 처리해 긴 로어북에서 여러 렌더 프레임을
+    // 기다리는 시간을 줄이되, 시간 예산을 넘으면 즉시 다음 프레임에 양보한다.
+    const narrowLayout = isNarrowEntryLayout();
+    const batchSize = narrowLayout ? 50 : 80;
+    const batchBudgetMs = narrowLayout ? 48 : 60;
     state.enhancing = true;
     let listRevealed = false;
 
@@ -5758,8 +5945,11 @@ function enhanceAll() {
         state.enhancing = false;
         state.enhanceChunkRaf = 0;
 
-        syncResponsiveEntryLayouts();
-        applyMobileDisplaySettings();
+        // 각 헤더와 열린 편집기는 자기 배치·배지를 구성하면서 이미 한 번
+        // 정리됐다. 목록 공개 직전에 전체 항목을 다시 두 번 순회하지 않는다.
+        // 공개가 아직 보류된 예외 경로에서만 마지막 복구 순회를 수행한다.
+        if (!listRevealed) syncResponsiveEntryLayouts();
+        applyMobileDisplaySettings(false);
         syncFilterButtons();
         syncAutoControls();
         // The editor can render its selected lorebook after this extension's first
@@ -5828,7 +6018,7 @@ function enhanceAll() {
         for (; index < hardEnd; index++) {
             const entry = entries[index];
             if (!entry?.isConnected) continue;
-            enhanceEntryHeader(entry);
+            enhanceEntryHeader(entry, narrowLayout);
             if (isEntryEditorRendered(entry)) openedEntries.push(entry);
             if (index > start && performance.now() >= deadline) {
                 index += 1;
@@ -5879,6 +6069,7 @@ function scheduleEnhance() {
 function bindEvents() {
     const worldSelect = document.getElementById('world_editor_select');
     const worldInfoDrawerToggle = document.querySelector('#WI-SP-button > .drawer-toggle');
+    window.addEventListener('pointerdown', markFoldyFolderOperationIntent, true);
     window.addEventListener('pointerdown', armFoldyFolderDeleteDrawerGuard, true);
     window.addEventListener('click', armFoldyFolderDeleteDrawerGuard, true);
     worldInfoDrawerToggle?.addEventListener('pointerdown', () => {
@@ -6025,7 +6216,7 @@ function init() {
             changedEntries.forEach(entry => placeResponsiveHeaderFields(entry));
         });
     }
-    applyMobileDisplaySettings();
+    applyMobileDisplaySettings(false);
     if (isWorldInfoDrawerOpen() && currentBookName() && !hasCompleteVisibleEntryHeaders()) {
         beginWorldDrawerOpenLoading();
     }

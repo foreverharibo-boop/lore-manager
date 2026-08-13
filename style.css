@@ -676,7 +676,7 @@
 }
 
 #WorldInfo.slb-active.slb-book-switching #world_popup_entries_list::before {
-    content: '로어북을 여는 중입니다.';
+    content: '로어북을 준비 중입니다.';
     position: absolute;
     inset: 0;
     display: flex;
@@ -4241,7 +4241,10 @@
 
 #WorldInfo.slb-active #world_popup_entries_list.foldy-lore-pending::before,
 #WorldInfo.slb-active #world_popup_entries_list.slb-foldy-settling::before {
-    content: '폴더를 정리 중입니다.';
+    /* Foldy also uses its pending class while it applies an already-saved
+       layout during the first lorebook render. That is book loading, not a
+       user folder operation. */
+    content: '로어북을 준비 중입니다.';
     position: absolute;
     inset: 0;
     display: flex;
@@ -4250,4 +4253,16 @@
     color: var(--SmartThemeBodyColor, inherit);
     font-size: 0.9em;
     opacity: 0.7;
+}
+
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending::before,
+#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling::before {
+    content: '폴더를 정리 중입니다.';
+}
+
+/* 첫 열기/책 전환은 Foldy가 내부 레이아웃 값을 보정하더라도 로어북 준비가
+   우선이다. 사용자가 실제 폴더 작업을 할 때는 book-switching이 없다. */
+#WorldInfo.slb-active.slb-book-switching #world_popup_entries_list.foldy-lore-pending::before,
+#WorldInfo.slb-active.slb-book-switching #world_popup_entries_list.slb-foldy-settling::before {
+    content: '로어북을 준비 중입니다.';
 }
