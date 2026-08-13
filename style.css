@@ -692,13 +692,6 @@
     margin: 0 0 8px;
 }
 
-/* Foldy compatibility: folder members are native lorebook entries nested one
-   level deeper. Keep the manager's row spacing without touching Foldy's
-   folder containers or controls. */
-#WorldInfo.slb-active #world_popup_entries_list .foldy-lore-items > .world_entry {
-    margin: 0 0 8px;
-}
-
 /* The native desktop header is a single fixed-width row, so it drifts away
    from fields when the extension changes the editor width. Each field gets
    its own label instead. */
@@ -2042,10 +2035,6 @@
 /* v1.3.18 — evenly distributed compact activation controls and readable exclude */
 @media (max-width: 760px) {
     #WorldInfo.slb-active #world_popup_entries_list > .world_entry {
-        margin-bottom: 5px;
-    }
-
-    #WorldInfo.slb-active #world_popup_entries_list .foldy-lore-items > .world_entry {
         margin-bottom: 5px;
     }
 
@@ -4221,97 +4210,8 @@
     grid-row: 1 !important;
 }
 
-/* v1.4.39 — Foldy 렌더 중에는 목록 자체를 마스킹한다. 자식 배지에 걸린
-   visibility:visible !important가 부모 숨김을 뚫고 단독 노출되는 문제를 막는다. */
-#WorldInfo.slb-active #world_popup_entries_list.foldy-lore-pending:not(.slb-foldy-ready),
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-settling:not(.slb-foldy-ready) {
-    position: relative !important;
-    box-sizing: border-box !important;
-    height: 64px !important;
-    min-height: 64px !important;
-    max-height: 64px !important;
-    overflow: hidden !important;
-    pointer-events: none !important;
-}
-
-#WorldInfo.slb-active #world_popup_entries_list.foldy-lore-pending:not(.slb-foldy-ready) > *,
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-settling:not(.slb-foldy-ready) > * {
-    display: none !important;
-}
-
-#WorldInfo.slb-active #world_popup_entries_list.foldy-lore-pending:not(.slb-foldy-ready)::before,
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-settling:not(.slb-foldy-ready)::before {
-    /* Foldy also uses its pending class while it applies an already-saved
-       layout during the first lorebook render. That is book loading, not a
-       user folder operation. */
-    content: '로어북을 준비 중입니다.';
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--SmartThemeBodyColor, inherit);
-    font-size: 0.9em;
-    opacity: 0.7;
-}
-
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending:not(.slb-foldy-ready)::before,
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling:not(.slb-foldy-ready)::before {
-    content: '폴더를 정리 중입니다.';
-}
-
-/* 폴더 삭제가 시작된 첫 프레임에는 이전 Foldy 렌더의 ready 표식이 아직
-   남을 수 있다. 폴더 작업 중에는 ready 여부와 무관하게 목록을 한 덩어리로
-   가려 모바일 주입 방식 배지만 먼저 비치는 순간을 없앤다. */
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending,
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling {
-    position: relative !important;
-    box-sizing: border-box !important;
-    height: 64px !important;
-    min-height: 64px !important;
-    max-height: 64px !important;
-    overflow: hidden !important;
-    pointer-events: none !important;
-}
-
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending > *,
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling > * {
-    display: none !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
-}
-
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending .slb-mobile-entry-state-badge,
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling .slb-mobile-entry-state-badge {
-    display: none !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
-}
-
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.foldy-lore-pending::before,
-#WorldInfo.slb-active #world_popup_entries_list.slb-foldy-folder-operation.slb-foldy-settling::before {
-    content: '폴더를 정리 중입니다.';
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    visibility: visible !important;
-    color: var(--SmartThemeBodyColor, inherit);
-    font-size: 0.9em;
-    opacity: 0.7;
-}
-
-/* 첫 열기/책 전환은 Foldy가 내부 레이아웃 값을 보정하더라도 로어북 준비가
-   우선이다. 사용자가 실제 폴더 작업을 할 때는 book-switching이 없다. */
-#WorldInfo.slb-active.slb-book-switching #world_popup_entries_list.foldy-lore-pending:not(.slb-foldy-ready)::before,
-#WorldInfo.slb-active.slb-book-switching #world_popup_entries_list.slb-foldy-settling:not(.slb-foldy-ready)::before {
-    content: '로어북을 준비 중입니다.';
-}
-
-/* v1.4.50 — 사용자가 직접 켜는 로어북 매니저 고속 폴더 모드.
-   Foldy 원본 DOM/이벤트와 구분되는 slb-fast-foldy-* 클래스만 사용한다. */
-.slb-fast-foldy-settings {
+/* v1.4.51 — extension-tab single-choice manager mode selector. */
+.slb-manager-mode-settings {
     display: grid;
     gap: 6px;
     margin-top: 10px;
@@ -4321,13 +4221,77 @@
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor, transparent) 82%, transparent);
 }
 
-.slb-fast-foldy-settings > label {
-    display: flex;
-    align-items: center;
-    gap: 7px;
+.slb-manager-mode-settings > legend {
+    padding: 0 5px;
+    font-weight: 650;
 }
 
-.slb-fast-foldy-settings > small {
+.slb-manager-mode-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+}
+
+.slb-manager-mode-choice {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 48px;
+    padding: 7px 9px;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, currentColor) 70%, transparent);
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.slb-manager-mode-choice.is-selected {
+    border-color: var(--SmartThemeQuoteColor, currentColor);
+    background: color-mix(in srgb, var(--SmartThemeQuoteColor, currentColor) 13%, transparent);
+}
+
+.slb-manager-mode-choice.is-disabled {
+    cursor: not-allowed;
+    opacity: 0.46;
+}
+
+.slb-manager-mode-choice > input[type='radio'] {
+    appearance: none;
+    display: grid;
+    place-content: center;
+    box-sizing: border-box;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    border: 1.5px solid var(--SmartThemeBorderColor, currentColor);
+    border-radius: 5px;
+    background: transparent;
+}
+
+.slb-manager-mode-choice > input[type='radio']::before {
+    content: '✓';
+    color: var(--SmartThemeQuoteColor, currentColor);
+    font-size: 15px;
+    font-weight: 800;
+    line-height: 1;
+    opacity: 0;
+    transform: scale(0.65);
+}
+
+.slb-manager-mode-choice > input[type='radio']:checked::before {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.slb-manager-mode-choice > span {
+    min-width: 0;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+.slb-manager-mode-settings > small {
     line-height: 1.4;
     opacity: 0.78;
 }
@@ -4340,9 +4304,9 @@
     display: inline-flex !important;
 }
 
-/* 고속 모드에서는 같은 자리에 있는 Foldy 원본 로어북 도구만 잠시 숨긴다.
+/* 연동 모드에서는 같은 자리에 있는 Foldy 원본 로어북 도구만 잠시 숨긴다.
    요소와 리스너는 삭제하지 않아 모드를 끄는 즉시 원본 기능이 돌아온다. */
-#WorldInfo.slb-fast-foldy-active :is(
+#WorldInfo.slb-foldy-linked-mode :is(
     #foldy_lore_create,
     #foldy_lore_import,
     #foldy_lore_export,
@@ -4350,11 +4314,6 @@
     #foldy_lore_collapse_all,
     #foldy_lore_root_bulk_move
 ) {
-    display: none !important;
-}
-
-#WorldInfo.slb-fast-foldy-active .foldy-lore-entry-actions,
-#WorldInfo.slb-fast-foldy-active .foldy-move-to-folder {
     display: none !important;
 }
 
