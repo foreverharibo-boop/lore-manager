@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.40';
+const VERSION = '1.4.41';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -87,6 +87,9 @@ const state = {
     enhanceChunkRaf: 0,
     bookSwitchRunId: 0,
     bookSwitch: null,
+    bookDataHydration: null,
+    worldDrawerOpening: false,
+    drawerOpenLoadingTimer: null,
     tokenTimer: null,
     tokenIdleHandle: null,
     tokenRenderTimer: null,
@@ -3268,7 +3271,9 @@ function bindWorkspaceEntries(entries) {
         }
         if (state.bookSwitch && !state.bookSwitch.ready) {
             if (mutations.some(mutation => mutation.type === 'childList')) {
-                scheduleBookSwitchReadyCheck(70);
+                // 실리태번이 새 현재 페이지 행을 붙인 바로 그 시점이다.
+                // 추가 고정 대기 없이 다음 작업에서 곧바로 완성 여부를 본다.
+                scheduleBookSwitchReadyCheck(0);
             }
             return;
         }
@@ -5473,6 +5478,12 @@ function scheduleInitialTokenSummary(data = null, delay = 180) {
             state.tokenTimer = null;
             state.tokenIdleHandle = null;
             if (currentBookName() !== expectedBook) return;
+            // 실리태번이 아직 새 로어북을 받는 중이면 동일 데이터를 다시
+            // 요청하지 않는다. 목록이 완성된 뒤 캐시된 데이터로 계산한다.
+            if (state.bookSwitch?.book === expectedBook && !state.bookSwitch.ready) {
+                state.tokenTimer = setTimeout(run, 100);
+                return;
+            }
             const readyData = data || (state.currentBook === expectedBook ? state.currentBookData : null);
             void refreshTokenSummary(readyData);
         };
@@ -5495,34 +5506,77 @@ function setBookSwitchLoading(active) {
     else entries?.removeAttribute('aria-busy');
 }
 
-function getRenderedEntryTitle(entry) {
-    // 전환 확인은 목록이 만들어지는 동안 여러 번 실행된다. 일반적인
-    // SillyTavern 구조는 먼저 한 번의 직접 탐색으로 끝내고, 버전/테마가
-    // 다른 경우에만 비용이 큰 구조 기반 호환 탐색을 사용한다.
-    const direct = queryCompatible(entry, [
-        '[name="comment"]',
-        '[name="entryComment"]',
-        '[name="memo"]',
-        'textarea.WIEntryTitle',
-        'textarea.world_entry_comment',
-        'textarea.entry-title',
-    ]);
-    if (direct) return String(direct.value ?? '');
-
-    const control = findCompatibleControl(entry, {
-        names: ['comment', 'entryComment', 'memo'],
-        classes: ['textarea.WIEntryTitle', 'textarea.world_entry_comment', 'textarea.entry-title'],
-        blocks: ['.WIEntryTitleAndStatus', '.WIEntryTitleStatus', '.world_entry_title_and_status', '[data-role="entry-title-status"]'],
-        labels: ['Title/Memo', 'Entry Title', 'Memo', '제목'],
-        control: 'textarea, input[type="text"]',
-    });
-    return control ? String(control.value ?? '') : null;
+function isWorldInfoDrawerOpen() {
+    const worldInfo = document.getElementById('WorldInfo');
+    if (!worldInfo) return false;
+    // SillyTavern의 드로어는 열기 애니메이션 도중 closedDrawer를 먼저
+    // 제거하고 openDrawer를 나중에 붙이는 버전이 있다. 명시적인 닫힘
+    // 표식이 없으면 열리는 중도 열린 상태로 취급한다.
+    return !worldInfo.hidden
+        && worldInfo.style.display !== 'none'
+        && worldInfo.style.height !== '0px'
+        && !worldInfo.classList.contains('closedDrawer');
 }
 
-function getRenderedEntriesSignature() {
-    return renderedEntries().map(entry => (
-        `${getUid(entry)}\u0000${getRenderedEntryTitle(entry) ?? ''}`
-    )).join('\u0001');
+function hasCompleteVisibleEntryHeaders() {
+    const entries = renderedEntries();
+    return entries.length > 0 && entries.every(isEntryHeaderReadyForReveal);
+}
+
+function beginWorldDrawerOpenLoading() {
+    if (state.drawerOpenLoadingTimer) clearTimeout(state.drawerOpenLoadingTimer);
+    state.drawerOpenLoadingTimer = null;
+    // 선택된 로어북이 없을 때는 빈 선택 화면을 로딩 화면으로 오인하지 않는다.
+    // 실제 로어북이 선택된 경우에만 첫 항목 UI가 완성될 때까지 가린다.
+    if (!currentBookName()) {
+        state.worldDrawerOpening = false;
+        if (!state.bookSwitch && !state.foldyRevealPending) setBookSwitchLoading(false);
+        return;
+    }
+    state.worldDrawerOpening = true;
+    if (!hasCompleteVisibleEntryHeaders()) setBookSwitchLoading(true);
+
+    // 항목이 없는 로어북이나 다른 확장이 렌더를 중단한 경우에도 드로어를
+    // 영구히 가리지 않는다. 정상 경로에서는 헤더 완료 즉시 먼저 해제된다.
+    state.drawerOpenLoadingTimer = setTimeout(() => {
+        state.drawerOpenLoadingTimer = null;
+        state.worldDrawerOpening = false;
+        if (!state.bookSwitch && !state.foldyRevealPending) setBookSwitchLoading(false);
+    }, 30000);
+}
+
+function finishWorldDrawerOpenLoading() {
+    if (!state.worldDrawerOpening) return;
+    state.worldDrawerOpening = false;
+    if (state.drawerOpenLoadingTimer) clearTimeout(state.drawerOpenLoadingTimer);
+    state.drawerOpenLoadingTimer = null;
+}
+
+function hydrateCurrentBookDataAfterReveal(book) {
+    if (!book || currentBookName() !== book) return;
+    if (state.currentBook === book && state.currentBookData?.entries) return;
+    if (state.bookDataHydration?.book === book) return;
+
+    const hydration = { book };
+    state.bookDataHydration = hydration;
+    Promise.resolve(loadWorldInfo(book))
+        .then(data => {
+            if (state.bookDataHydration !== hydration || currentBookName() !== book) return;
+            if (data?.entries) {
+                state.currentBook = book;
+                state.currentBookData = data;
+                renderTokenSummary(book, data);
+            }
+        })
+        .catch(error => console.warn('[로어북 매니저] 로어북 데이터 동기화 실패', error))
+        .finally(() => {
+            if (state.bookDataHydration === hydration) state.bookDataHydration = null;
+            // 데이터 동기화가 실패해도 다음 기본 동기화 주기가 다시 시도할 수
+            // 있도록 전환 표식을 영구히 붙잡아 두지 않는다.
+            if (currentBookName() === book && state.currentBook !== book) {
+                state.pendingBookSwitch = '';
+            }
+        });
 }
 
 function isCurrentBookDomReady(transition) {
@@ -5530,34 +5584,42 @@ function isCurrentBookDomReady(transition) {
     const entries = document.getElementById('world_popup_entries_list');
     if (!entries) return false;
     const rows = renderedEntries();
-    if (!rows.length) return Date.now() - transition.startedAt >= 220;
+    // SillyTavern은 렌더 시작 시 기존 행을 먼저 비운 뒤 항목 템플릿을
+    // 비동기로 만든다. 행이 0개라는 이유만으로 완료 처리하면 그 중간의
+    // 빈 화면을 공개하게 된다. 빈 로어북도 마지막에 붙는 네이티브 제목
+    // 행이 생겼을 때만 완료로 인정한다.
+    if (!rows.length) return Boolean(entries.querySelector('#WIEntryHeaderTitlesPC'));
 
     // 실리태번이 선택 변경 뒤 목록 노드를 교체했다면 확장 쪽 데이터 요청을
-    // 기다릴 필요가 없다. 기본 행이 이미 준비된 것이므로 즉시 표시한다.
-    const renderedSignature = getRenderedEntriesSignature();
+    // 기다릴 필요가 없다. 매 16ms마다 모든 제목 문자열을 만드는 대신 노드
+    // 교체 여부만 확인해 큰 페이지의 전환 검사 비용을 일정하게 유지한다.
     const rowNodesChanged = rows.length !== transition.previousRows.length
-        || rows.some(row => !transition.previousRows.includes(row));
-    if (rowNodesChanged || renderedSignature !== transition.previousSignature) return true;
-    if (!transition.data?.entries) return false;
-
-    return rows.every(row => {
-        const uid = getUid(row);
-        const expected = transition.data.entries?.[uid] ?? transition.data.entries?.[Number(uid)];
-        if (!expected) return false;
-        const renderedTitle = getRenderedEntryTitle(row);
-        return renderedTitle !== null && renderedTitle === String(expected.comment ?? '');
-    });
+        || rows.some(row => !transition.previousRowSet.has(row));
+    return rowNodesChanged;
 }
 
-function scheduleBookSwitchReadyCheck(delay = 32) {
+function scheduleBookSwitchReadyCheck(delay = 0) {
     const transition = state.bookSwitch;
     if (!transition || transition.ready) return;
     clearTimeout(transition.timer);
     transition.timer = setTimeout(() => {
         if (state.bookSwitch !== transition || currentBookName() !== transition.book) return;
         const elapsed = Date.now() - transition.startedAt;
-        if (!isCurrentBookDomReady(transition) && elapsed < 4500) {
-            scheduleBookSwitchReadyCheck(40);
+        if (!isCurrentBookDomReady(transition)) {
+            if (elapsed >= 30000) {
+                // 실리태번 요청이 실패하거나 렌더가 중단된 경우에는 기존 행을
+                // 절대 다시 공개하지 않고 안내만 종료한다. 다음 변경/새로고침이
+                // 정상 기본 렌더 경로를 다시 시작할 수 있도록 상태만 푼다.
+                clearTimeout(transition.timer);
+                state.bookSwitch = null;
+                state.pendingBookSwitch = '';
+                finishWorldDrawerOpenLoading();
+                setBookSwitchLoading(false);
+                return;
+            }
+            // 일반 경로는 DOM observer가 0ms 확인을 예약한다. 이 타이머는
+            // observer가 누락된 특이 브라우저만 보완하므로 느슨하게 돈다.
+            scheduleBookSwitchReadyCheck(50);
             return;
         }
         transition.ready = true;
@@ -5566,9 +5628,12 @@ function scheduleBookSwitchReadyCheck(delay = 32) {
         // 새 책의 네이티브 제목 행을 확인한 뒤에도 가림막은 유지한다.
         // 로어북 매니저의 제목·주입 방식·작업 버튼까지 완성된 시점에 해제한다.
         finishBookSwitch(book);
-        requestAnimationFrame(() => {
-            if (currentBookName() === book) scheduleEnhance();
-        });
+        if (currentBookName() === book) {
+            // observer 콜백이 끝난 다음 작업이므로 실리태번의 페이지 append는
+            // 이미 끝났다. 여기서 다시 한 프레임 기다리지 않고 바로 헤더를 만든다.
+            if (!state.sorting && !state.enhancing) enhanceAll();
+            else scheduleEnhance();
+        }
     }, delay);
 }
 
@@ -5592,36 +5657,23 @@ function beginBookSwitch(book) {
         return;
     }
 
+    const previousRows = renderedEntries();
     const transition = {
         runId: state.bookSwitchRunId,
         book,
-        data: null,
         ready: false,
         timer: null,
         startedAt: Date.now(),
-        previousSignature: getRenderedEntriesSignature(),
-        previousRows: renderedEntries(),
+        previousRows,
+        previousRowSet: new Set(previousRows),
     };
     state.bookSwitch = transition;
     state.pendingBookSwitch = book;
     setBookSwitchLoading(true);
-
-    Promise.resolve(loadWorldInfo(book))
-        .then(data => {
-            if (state.bookSwitch !== transition || currentBookName() !== book) return;
-            transition.data = data;
-            if (data?.entries) {
-                state.currentBook = book;
-                state.currentBookData = data;
-            }
-            scheduleBookSwitchReadyCheck(24);
-        })
-        .catch(error => {
-            console.warn('[로어북 매니저] 전환 화면 확인용 로어북 로드 실패', error);
-            if (state.bookSwitch !== transition) return;
-            scheduleBookSwitchReadyCheck(120);
-        });
-    scheduleBookSwitchReadyCheck(40);
+    // 실리태번의 showWorldEditor가 이미 같은 데이터를 불러오고 있다. 여기서
+    // 다시 loadWorldInfo를 호출하면 첫 방문 시 동일 요청이 겹칠 수 있으므로,
+    // 네이티브 현재 페이지 DOM만 기다린 뒤 데이터는 목록 공개 후 동기화한다.
+    scheduleBookSwitchReadyCheck(0);
 }
 
 function finishBookSwitch(book) {
@@ -5651,6 +5703,8 @@ function isEntryHeaderReadyForReveal(entry) {
 
 function revealCompletedEntryList(book, entries) {
     if (currentBookName() !== book) return false;
+    const list = document.getElementById('world_popup_entries_list');
+    if (!entries.length && !list?.querySelector('#WIEntryHeaderTitlesPC')) return false;
     const liveEntries = renderedEntries();
     const sameRenderedPage = liveEntries.length === entries.length
         && liveEntries.every((entry, index) => entry === entries[index]);
@@ -5670,7 +5724,9 @@ function revealCompletedEntryList(book, entries) {
             currentEntries?.classList.remove('slb-foldy-settling');
         }
     }
+    finishWorldDrawerOpenLoading();
     if (!state.bookSwitch) setBookSwitchLoading(false);
+    hydrateCurrentBookDataAfterReveal(book);
     return true;
 }
 
@@ -5689,11 +5745,11 @@ function enhanceAll() {
     const entries = renderedEntries();
     const bookAtStart = currentBookName();
     const runId = ++state.enhanceRunId;
-    // 네이티브 제목 행은 이미 보이는 상태다. 모바일은 한 프레임에 최대
-    // 12개(데스크톱 18개)를 처리하되 10ms를 넘기면 다음 프레임으로
+    // 네이티브 제목 행은 로딩 가림막 뒤에 있다. 현재 페이지(보통 25개)는
+    // 가능하면 한 프레임에 끝내고, 처리 시간이 길어질 때만 다음 프레임으로
     // 양보하여 스크롤과 터치를 막지 않는다.
-    const batchSize = isNarrowEntryLayout() ? 12 : 18;
-    const batchBudgetMs = isNarrowEntryLayout() ? 10 : 12;
+    const batchSize = isNarrowEntryLayout() ? 25 : 40;
+    const batchBudgetMs = isNarrowEntryLayout() ? 32 : 40;
     state.enhancing = true;
     let listRevealed = false;
 
@@ -5822,8 +5878,14 @@ function scheduleEnhance() {
 
 function bindEvents() {
     const worldSelect = document.getElementById('world_editor_select');
+    const worldInfoDrawerToggle = document.querySelector('#WI-SP-button > .drawer-toggle');
     window.addEventListener('pointerdown', armFoldyFolderDeleteDrawerGuard, true);
     window.addEventListener('click', armFoldyFolderDeleteDrawerGuard, true);
+    worldInfoDrawerToggle?.addEventListener('pointerdown', () => {
+        // SillyTavern의 클릭 핸들러가 드로어를 화면에 그리기 전 같은 입력
+        // 이벤트에서 가림막을 먼저 준비해, 첫 프레임에 빈 행이 보이지 않게 한다.
+        if (!isWorldInfoDrawerOpen()) beginWorldDrawerOpenLoading();
+    }, { passive: true });
     const markWorldSelectionIntent = () => {
         state.worldSelectUserIntentUntil = Date.now() + 4000;
     };
@@ -5858,7 +5920,15 @@ function bindEvents() {
             scheduleLorebookOpenBackup(currentBookName(), isNarrowEntryLayout() ? 900 : 650);
         }
     });
-    document.querySelector('#WI-SP-button > .drawer-toggle')?.addEventListener('click', () => {
+    worldInfoDrawerToggle?.addEventListener('click', () => {
+        // 키보드/프로그램 클릭처럼 pointerdown이 없는 열기도 보완한다.
+        if (isWorldInfoDrawerOpen() && !hasCompleteVisibleEntryHeaders()) {
+            beginWorldDrawerOpenLoading();
+            // 이미 실리태번 행이 준비되어 있다면 다음 animation frame까지
+            // 기다리지 않고 같은 열기 동작에서 바로 헤더를 완성한다.
+            if (!state.sorting && !state.enhancing) enhanceAll();
+            else scheduleEnhance();
+        }
         setTimeout(() => {
             const panel = document.getElementById('WorldInfo');
             if (panel && !panel.classList.contains('closedDrawer')) {
@@ -5956,7 +6026,12 @@ function init() {
         });
     }
     applyMobileDisplaySettings();
-    scheduleEnhance();
+    if (isWorldInfoDrawerOpen() && currentBookName() && !hasCompleteVisibleEntryHeaders()) {
+        beginWorldDrawerOpenLoading();
+    }
+    // 최초 로드 시 이미 존재하는 현재 페이지는 한 프레임 미루지 않고 바로
+    // 꾸민다. 항목이 아직 없다면 이후 DOM observer가 동일 경로를 실행한다.
+    enhanceAll();
     scheduleInitialTokenSummary();
     state.liveSyncTimer = setInterval(() => {
         enforceActivationOverviewIntegrity();
