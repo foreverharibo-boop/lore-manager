@@ -10,22 +10,32 @@ import { getTokenCountAsync } from '../../../tokenizers.js';
 import { loadWorldInfo, splitKeywordsAndRegexes, saveWorldInfo, setWIOriginalDataValue, updateWorldInfoList, worldInfoFilter, world_names } from '../../../world-info.js';
 import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
-import { createFastFoldyRenderer } from './fast-foldy.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.51';
+const VERSION = '1.4.52';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
 const MANAGER_MODE_STANDARD = 'standard';
 const MANAGER_MODE_FOLDY = 'foldy';
+const FOLDY_SORT_VALUES = Object.freeze(['foldy-order', 'foldy']);
+const OBSOLETE_MANAGER_FOLDY_SORT_VALUE = 'slb-fast-foldy';
+const FOLDY_LORE_CONTROL_IDS = Object.freeze([
+    'foldy_lore_create',
+    'foldy_lore_import',
+    'foldy_lore_export',
+    'foldy_lore_expand_all',
+    'foldy_lore_collapse_all',
+    'foldy_lore_root_bulk_move',
+]);
 const NATIVE_ENTRY_SELECTOR = '#world_popup_entries_list > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)';
-// The linked renderer owns only its own `.slb-fast-foldy-*` wrappers. Original
-// Foldy DOM is deliberately absent from both selectors so standard mode never
-// observes, moves, repairs, or rewrites another extension's folder UI.
+// Existing mode only handles SillyTavern's direct-root rows. Linked mode opts in
+// to the rows rendered by the installed Foldy extension; the manager never
+// creates, edits, persists, or replaces Foldy's folder DOM itself.
 const FOLDY_LINKED_ENTRY_SELECTOR = [
     NATIVE_ENTRY_SELECTOR,
-    '#world_popup_entries_list .slb-fast-foldy-items > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)',
+    '#world_popup_entries_list .foldy-lore-items > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)',
+    '#world_popup_entries_list .foldy-folder-items > .world_entry:not(.ui-sortable-helper):not(.ui-sortable-placeholder)',
 ].join(', ');
 const FULL_HEADER_FIELDS_MIN_WIDTH = 580;
 const HEADER_LAYOUT_SAFETY_GAP = 24;
@@ -132,11 +142,10 @@ const state = {
     responsiveObserverTarget: null,
     responsiveObservedWidth: 0,
     responsiveRaf: 0,
+    foldyModeReconcileTimer: null,
     settingsMigrationNeeded: false,
     googleTranslationQueue: Promise.resolve(),
 };
-
-let fastFoldyRenderer = null;
 
 function ensureCriticalLayoutStyles() {
     const styleId = 'slb-critical-layout-1-4-9';
@@ -542,6 +551,200 @@ function currentBookName() {
     return name;
 }
 
+function foldySortOption() {
+    const sort = document.getElementById('world_info_sort_order');
+    if (!sort) return null;
+    return FOLDY_SORT_VALUES
+        .map(value => Array.from(sort.options || []).find(option => option.value === value))
+        .find(Boolean) || null;
+}
+
+function isFoldySortValue(value) {
+    return FOLDY_SORT_VALUES.includes(String(value || ''));
+}
+
+function isFoldyLoreAvailable() {
+    const option = foldySortOption();
+    return Boolean(option && !option.disabled);
+}
+
+function nativeLoreSortValue(sort = document.getElementById('world_info_sort_order')) {
+    if (!sort) return '0';
+    const options = Array.from(sort.options || []);
+    const current = options.find(option => option.value === sort.value);
+    if (current
+        && !current.disabled
+        && !isFoldySortValue(current.value)
+        && current.value !== OBSOLETE_MANAGER_FOLDY_SORT_VALUE
+        && current.value !== 'search'
+        && current.dataset.rule !== 'custom') {
+        return current.value;
+    }
+    const native = options.find(option => option.value === '0' && !option.disabled)
+        || options.find(option => (
+            !option.disabled
+            && !isFoldySortValue(option.value)
+            && option.value !== OBSOLETE_MANAGER_FOLDY_SORT_VALUE
+            && option.value !== 'search'
+            && option.dataset.rule !== 'custom'
+        ));
+    return native?.value || '0';
+}
+
+function removeObsoleteManagerFoldyUi() {
+    for (const id of ['slb_fast_foldy_create', 'slb_fast_foldy_expand_all', 'slb_fast_foldy_collapse_all']) {
+        document.getElementById(id)?.remove();
+    }
+    document.getElementById('slb-fast-foldy-dialog')?.remove();
+    const sort = document.getElementById('world_info_sort_order');
+    sort?.querySelector(`option[value="${OBSOLETE_MANAGER_FOLDY_SORT_VALUE}"]`)?.remove();
+
+    // 1.4.51을 페이지 새로고침 없이 교체한 경우에만 남을 수 있는 매니저
+    // 소유 폴더를 평면화한다. Foldy 원본의 `.foldy-*` 노드는 건드리지 않는다.
+    const list = document.getElementById('world_popup_entries_list');
+    list?.querySelectorAll(':scope > .slb-fast-foldy-folder').forEach(folder => {
+        const rows = Array.from(folder.querySelectorAll(':scope > .slb-fast-foldy-items > .world_entry'));
+        rows.forEach(row => {
+            row.querySelectorAll('.slb-fast-foldy-move').forEach(button => button.remove());
+            folder.before(row);
+        });
+        folder.remove();
+    });
+    list?.classList.remove(
+        'slb-fast-foldy-root',
+        'slb-fast-foldy-rendering',
+        'slb-fast-foldy-sorting',
+        'slb-fast-foldy-pending',
+    );
+    document.getElementById('WorldInfo')?.classList.remove('slb-fast-foldy-active');
+}
+
+function setManagerHidden(element, hidden) {
+    if (!element) return;
+    if (hidden) {
+        if (element.dataset.slbManagerWasHidden === undefined) {
+            element.dataset.slbManagerWasHidden = element.hidden ? '1' : '0';
+        }
+        element.hidden = true;
+        return;
+    }
+    if (element.dataset.slbManagerWasHidden !== undefined) {
+        element.hidden = element.dataset.slbManagerWasHidden === '1';
+        delete element.dataset.slbManagerWasHidden;
+    }
+}
+
+function syncFoldyControlsForMode(mode = getSettings().managerMode) {
+    const linked = mode === MANAGER_MODE_FOLDY;
+    const worldInfo = document.getElementById('WorldInfo');
+    worldInfo?.classList.toggle('slb-manager-standard-mode', !linked);
+    worldInfo?.classList.toggle('slb-foldy-linked-mode', linked);
+
+    FOLDY_LORE_CONTROL_IDS.forEach(id => setManagerHidden(document.getElementById(id), !linked));
+    const sort = document.getElementById('world_info_sort_order');
+    for (const value of FOLDY_SORT_VALUES) {
+        const option = Array.from(sort?.options || []).find(candidate => candidate.value === value);
+        setManagerHidden(option, !linked);
+    }
+}
+
+function markFoldyLinkedPreparing() {
+    if (!isFoldyLinkedMode() || !currentBookName()) return;
+    const list = document.getElementById('world_popup_entries_list');
+    list?.classList.add('slb-foldy-linked-preparing');
+    list?.setAttribute('aria-busy', 'true');
+}
+
+function clearFoldyLinkedPreparing() {
+    const list = document.getElementById('world_popup_entries_list');
+    list?.classList.remove('slb-foldy-linked-preparing');
+    if (!document.getElementById('WorldInfo')?.classList.contains('slb-book-switching')) {
+        list?.removeAttribute('aria-busy');
+    }
+}
+
+function dispatchLoreSort(sort, value) {
+    if (!sort || sort.value === value) return false;
+    sort.value = value;
+    sort.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+}
+
+function activateOriginalFoldyView() {
+    const sort = document.getElementById('world_info_sort_order');
+    const option = foldySortOption();
+    if (!sort || !option || option.disabled) return false;
+    markFoldyLinkedPreparing();
+    const changed = dispatchLoreSort(sort, option.value);
+    const list = document.getElementById('world_popup_entries_list');
+    // 이미 Foldy가 렌더 중이거나 완성한 화면에는 중복 새로고침을 보내지 않는다.
+    if (!changed
+        && !list?.classList.contains('foldy-lore-pending')
+        && !list?.classList.contains('foldy-lore-root')) {
+        document.getElementById('world_refresh')?.click();
+    }
+    return true;
+}
+
+function activateNativeLoreView() {
+    const sort = document.getElementById('world_info_sort_order');
+    const list = document.getElementById('world_popup_entries_list');
+    if (!sort) return false;
+    const wasFoldyView = isFoldySortValue(sort.value)
+        || sort.value === OBSOLETE_MANAGER_FOLDY_SORT_VALUE
+        || list?.classList.contains('foldy-lore-root')
+        || Boolean(list?.querySelector(':scope > .foldy-folder, :scope > .foldy-lore-folder'))
+        || Boolean(list?.querySelector('.foldy-lore-entry-actions'))
+        || list?.classList.contains('slb-fast-foldy-root');
+    if (wasFoldyView && currentBookName()) setBookSwitchLoading(true);
+    const changed = dispatchLoreSort(sort, nativeLoreSortValue(sort));
+    if (!changed && wasFoldyView) {
+        // Foldy가 네이티브 정렬 전환 뒤 늦게 렌더를 끝낸 경우, 같은 값의
+        // change를 다시 보내 원본 정리 리스너와 ST 목록 갱신을 실행한다.
+        sort.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    clearFoldyLinkedPreparing();
+    return true;
+}
+
+function scheduleFoldyModeReconciliation(attempt = 0) {
+    clearTimeout(state.foldyModeReconcileTimer);
+    state.foldyModeReconcileTimer = null;
+    const mode = getSettings().managerMode;
+    const option = foldySortOption();
+    if (option) {
+        syncFoldyControlsForMode(mode);
+        if (mode === MANAGER_MODE_FOLDY) {
+            if (option.disabled) {
+                applyManagerMode(MANAGER_MODE_STANDARD, {
+                    persist: true,
+                    announce: true,
+                    initial: false,
+                });
+                return;
+            }
+            activateOriginalFoldyView();
+        } else {
+            activateNativeLoreView();
+        }
+        window.dispatchEvent(new CustomEvent('slb-manager-mode-change', {
+            detail: { mode, unavailable: false },
+        }));
+        return;
+    }
+    if (attempt >= 100) {
+        if (mode === MANAGER_MODE_FOLDY) {
+            applyManagerMode(MANAGER_MODE_STANDARD, {
+                persist: true,
+                announce: true,
+                initial: false,
+            });
+        }
+        return;
+    }
+    state.foldyModeReconcileTimer = setTimeout(() => scheduleFoldyModeReconciliation(attempt + 1), 100);
+}
+
 function applyManagerMode(requestedMode, {
     persist = true,
     announce = false,
@@ -552,22 +755,23 @@ function applyManagerMode(requestedMode, {
         ? MANAGER_MODE_FOLDY
         : MANAGER_MODE_STANDARD;
     let unavailable = false;
-
-    if (mode === MANAGER_MODE_FOLDY) {
-        if (!fastFoldyRenderer?.isAvailable()) {
-            mode = MANAGER_MODE_STANDARD;
-            unavailable = true;
-            fastFoldyRenderer?.deactivate({ returnToNative: true });
-        } else {
-            fastFoldyRenderer.activate({ announce: false });
-        }
-    } else {
-        fastFoldyRenderer?.deactivate({ returnToNative: true });
+    const option = foldySortOption();
+    // Foldy의 스크립트가 먼저 로드됐어도 원본 툴바 설치는 비동기일 수 있다.
+    // 옵션이 아직 없으면 저장된 연동 선택을 지우지 않고 최대 10초 기다린다.
+    if (mode === MANAGER_MODE_FOLDY && option?.disabled) {
+        mode = MANAGER_MODE_STANDARD;
+        unavailable = true;
     }
-
     settings.managerMode = mode;
-    const worldInfo = document.getElementById('WorldInfo');
-    worldInfo?.classList.toggle('slb-foldy-linked-mode', mode === MANAGER_MODE_FOLDY);
+    removeObsoleteManagerFoldyUi();
+    syncFoldyControlsForMode(mode);
+    if (mode === MANAGER_MODE_FOLDY) {
+        markFoldyLinkedPreparing();
+        if (option && !option.disabled) activateOriginalFoldyView();
+    } else {
+        activateNativeLoreView();
+    }
+    scheduleFoldyModeReconciliation();
     state.navigatorDirty = true;
     if (persist || unavailable) void Promise.resolve(saveSettings());
 
@@ -578,9 +782,9 @@ function applyManagerMode(requestedMode, {
         if (unavailable) {
             notify('Foldy 로어북 기능을 찾지 못해 기존 로어북 매니저를 유지했습니다.', 'warning');
         } else if (mode === MANAGER_MODE_FOLDY) {
-            notify('폴디 연동 로어북 매니저를 켰습니다. Foldy 원본은 수정하지 않습니다.', 'success');
+            notify('폴디 연동 로어북 매니저를 켰습니다. Foldy 원본 폴더 기능을 그대로 연결합니다.', 'success');
         } else {
-            notify('기존 로어북 매니저로 전환했습니다. 매니저의 폴디 연동 기능을 모두 껐습니다.', 'success');
+            notify('기존 로어북 매니저로 전환했습니다. Foldy 로어북 UI를 모두 숨겼습니다.', 'success');
         }
     }
     if (!initial) scheduleEnhance();
@@ -1786,11 +1990,12 @@ async function resetExtensionStorage({ refreshUI = false } = {}) {
     } catch (error) {
         console.warn('[로어북 매니저] 토큰 캐시 정리 실패', error);
     }
-    // 확장을 삭제한 뒤 존재하지 않는 내부 정렬값이 남지 않도록 네이티브
-    // 정렬로 돌려놓는다. Foldy 데이터와 Foldy 확장은 그대로 보존한다.
-    if (fastFoldyRenderer?.isActive()) {
-        fastFoldyRenderer.deactivate({ returnToNative: true });
-    }
+    // 확장을 삭제한 뒤에는 네이티브 정렬로 돌아간다. Foldy 원본 파일과
+    // 저장된 폴더 구조는 삭제하거나 수정하지 않는다.
+    clearTimeout(state.foldyModeReconcileTimer);
+    state.foldyModeReconcileTimer = null;
+    removeObsoleteManagerFoldyUi();
+    activateNativeLoreView();
     delete extension_settings[EXTENSION_NAME];
     if (refreshUI) clearVisibleTranslations();
     await flushExtensionSettings();
@@ -2536,8 +2741,8 @@ function createAIBar() {
                             <span>폴디 연동 로어북 매니저</span>
                         </label>
                     </div>
-                    <small id="slb-manager-mode-status">기존 모드는 폴디 DOM·설정·이벤트를 사용하지 않습니다.</small>
-                    <small>폴디 연동 모드는 Foldy의 저장된 폴더 구조만 호환해 매니저가 직접 렌더합니다. Foldy 원본 파일·함수·이벤트는 수정하거나 가로채지 않습니다.</small>
+                    <small id="slb-manager-mode-status">기존 모드는 Foldy의 로어북 버튼·폴더 UI를 표시하지 않습니다.</small>
+                    <small>폴디 연동 모드는 설치된 Foldy 원본의 폴더 버튼·팝업·저장·정렬 동작을 그대로 사용하고, 그 안의 로어북 항목에만 매니저 UI를 연결합니다.</small>
                 </fieldset>
                 <details class="slb-backup-settings">
                     <summary><span><i class="fa-solid fa-box-archive" aria-hidden="true"></i> 로어북 백업</span><small id="slb-backup-count">0개</small></summary>
@@ -2600,19 +2805,21 @@ function createAIBar() {
     optionsLocation.value = settings.quickOptionsLocation;
     autoBackupEnabled.checked = settings.autoBackupEnabled;
     const syncManagerModeControls = () => {
-        const available = Boolean(fastFoldyRenderer?.isAvailable());
+        const available = isFoldyLoreAvailable();
         const mode = getSettings().managerMode;
         managerModeControls.forEach(input => {
             input.checked = input.value === mode;
-            input.disabled = input.value === MANAGER_MODE_FOLDY && !available;
+            input.disabled = input.value === MANAGER_MODE_FOLDY && !available && mode !== MANAGER_MODE_FOLDY;
             input.closest('.slb-manager-mode-choice')?.classList.toggle('is-selected', input.checked);
             input.closest('.slb-manager-mode-choice')?.classList.toggle('is-disabled', input.disabled);
         });
-        managerModeStatus.textContent = !available
+        managerModeStatus.textContent = !available && mode !== MANAGER_MODE_FOLDY
             ? '폴디 연동을 사용하려면 Foldy 1.5.0의 로어북 기능이 함께 설치되어 있어야 합니다.'
+            : !available
+                ? 'Foldy 원본 로어북 기능이 준비되기를 기다리는 중입니다.'
             : mode === MANAGER_MODE_FOLDY
-                ? '사용 중 · 저장된 Foldy 폴더 구조를 매니저가 빠르게 직접 표시합니다.'
-                : '사용 중 · 폴더 연동 없이 실리태번의 기본 로어북 항목만 처리합니다.';
+                ? '사용 중 · Foldy 원본 폴더 기능과 화면에 로어북 매니저를 연결합니다.'
+                : '사용 중 · Foldy 로어북 버튼과 폴더 UI 없이 기본 항목만 처리합니다.';
     };
     syncManagerModeControls();
     managerModeControls.forEach(input => input.addEventListener('change', () => {
@@ -2621,7 +2828,6 @@ function createAIBar() {
         syncManagerModeControls();
     }));
     window.addEventListener('slb-manager-mode-change', syncManagerModeControls);
-    window.addEventListener('slb-fast-foldy-mode-change', syncManagerModeControls);
     for (const [id, key] of mobileDisplayControls) {
         const input = document.getElementById(id);
         if (!input) continue;
@@ -3072,29 +3278,37 @@ function bindWorkspaceEntries(entries) {
         '.drag-handle',
     ].join(',');
     state.observer = new MutationObserver(mutations => {
-        if (fastFoldyRenderer?.isActive()) {
-            if (fastFoldyRenderer.isRendering()
-                || fastFoldyRenderer.isSuppressingObserver()
-                || entries.classList.contains('slb-fast-foldy-rendering')) {
-                state.navigatorDirty = true;
-                return;
-            }
-            const nativeRootChanged = mutations.some(mutation => (
+        const foldyStructureChanged = isFoldyLinkedMode() && mutations.some(mutation => (
+            mutation.type === 'childList'
+            && mutation.target instanceof Element
+            && (mutation.target === entries
+                || mutation.target.matches('.foldy-lore-items, .foldy-folder-items'))
+            && [...mutation.addedNodes, ...mutation.removedNodes].some(node => (
+                node instanceof Element
+                && (node.matches('.world_entry, #WIEntryHeaderTitlesPC, .foldy-folder, .foldy-lore-folder')
+                    || node.querySelector?.('.world_entry, #WIEntryHeaderTitlesPC, .foldy-folder, .foldy-lore-folder'))
+            ))
+        ));
+        if (foldyStructureChanged) {
+            // Foldy 원본이 목록을 비우고 폴더/행을 다시 붙이는 동안 제목 옆
+            // 주입 방식만 먼저 비치지 않도록, 완성된 매니저 헤더까지 가린다.
+            markFoldyLinkedPreparing();
+            state.navigatorDirty = true;
+        }
+        if (!isFoldyLinkedMode()) {
+            const originalFoldyViewArrived = mutations.some(mutation => (
                 mutation.type === 'childList'
                 && mutation.target === entries
                 && [...mutation.addedNodes, ...mutation.removedNodes].some(node => (
                     node instanceof Element
-                    && (node.matches('.world_entry, #WIEntryHeaderTitlesPC, .slb-fast-foldy-folder')
-                        || node.querySelector?.('.world_entry, #WIEntryHeaderTitlesPC'))
+                    && (node.matches('.foldy-folder, .foldy-lore-folder, .foldy-lore-entry-actions')
+                        || node.querySelector?.('.foldy-folder, .foldy-lore-folder, .foldy-lore-entry-actions'))
                 ))
             ));
-            if (nativeRootChanged) {
-                state.navigatorDirty = true;
-                if (state.bookSwitch && !state.bookSwitch.ready) {
-                    state.bookSwitch.domMutationObserved = true;
-                    scheduleBookSwitchReadyCheck(0);
-                }
-                fastFoldyRenderer.schedule('manager-observer');
+            if (originalFoldyViewArrived || entries.classList.contains('foldy-lore-root')) {
+                // Foldy가 비동기 설치 직후 저장된 폴더 정렬을 복원해도 기존
+                // 모드에서는 즉시 네이티브 정렬로 되돌린다.
+                activateNativeLoreView();
                 return;
             }
         }
@@ -3112,6 +3326,7 @@ function bindWorkspaceEntries(entries) {
         if (state.bookSwitch && !state.bookSwitch.ready) {
             return;
         }
+        if (isFoldyLinkedMode() && entries.classList.contains('foldy-lore-pending')) return;
         // 네이티브 드래그 정렬 중에는 jQuery UI가 헬퍼/플레이스홀더를 만들면서
         // 변이가 쏟아진다. 이때 enhance가 돌면 드래그 중인 DOM을 재구성해서
         // 정렬이 끊기므로 전부 무시하고, 드래그가 끝난 뒤 한 번에 갱신한다.
@@ -3296,12 +3511,19 @@ function syncEntryHeaderActions(entry) {
     const header = entry?.querySelector('.inline-drawer-header.slb-entry-header');
     const actions = header?.querySelector('.slb-header-actions');
     if (!header || !actions) return;
+    const foldyWrappers = isFoldyLinkedMode()
+        ? Array.from(header.children).filter(child => child.classList?.contains('foldy-lore-entry-actions'))
+        : [];
+    // Foldy 원본이 만든 실제 버튼 노드를 그대로 옮겨 리스너와 팝업 동작을
+    // 보존한다. 복제하거나 대체 버튼을 만들지 않는다.
+    const foldyActions = foldyWrappers.flatMap(wrapper => Array.from(wrapper.children));
     const orphanActions = Array.from(header.children).filter(child => (
         child !== actions
         && child.classList?.contains('menu_button')
     ));
-    actions.append(...orphanActions);
-    if (orphanActions.length) scheduleResponsiveEntryLayouts();
+    actions.append(...foldyActions, ...orphanActions);
+    foldyWrappers.forEach(wrapper => wrapper.remove());
+    if (foldyActions.length || orphanActions.length) scheduleResponsiveEntryLayouts();
 }
 
 function observeResponsiveHeader(entry) {
@@ -4066,10 +4288,9 @@ async function commitNavigatorOrder() {
     const entriesList = document.getElementById('world_popup_entries_list');
     if (!navList || !entriesList) return;
 
-    // The linked renderer owns its tree order. Appending rows to the root here
-    // would pull them out of manager folders and corrupt the saved layout.
-    if (entriesList.classList.contains('slb-fast-foldy-root')
-        || fastFoldyRenderer?.isActive()) return;
+    // 연동 모드의 트리 순서와 저장은 Foldy 원본이 소유한다. 여기서 행을
+    // 루트로 append하면 폴더 밖으로 빠지므로 매니저 내비게이터 정렬은 쉰다.
+    if (isFoldyLinkedMode() || entriesList.classList.contains('foldy-lore-root')) return;
 
     const orderedUids = Array.from(navList.querySelectorAll('.slb-nav-item')).map(item => String(item.dataset.uid));
     const elements = new Map(renderedEntries().map(element => [getUid(element), element]));
@@ -5418,8 +5639,10 @@ function scheduleInitialTokenSummary(data = null, delay = 180) {
                 || state.worldDrawerOpening
                 || state.bookSwitch?.book === expectedBook
                 || document.getElementById('WorldInfo')?.classList.contains('slb-book-switching')
-                || (fastFoldyRenderer?.isActive() && !fastFoldyRenderer.isReady())
-                || entriesList?.classList.contains('slb-fast-foldy-pending')
+                || (isFoldyLinkedMode() && (
+                    entriesList?.classList.contains('foldy-lore-pending')
+                    || entriesList?.classList.contains('slb-foldy-linked-preparing')
+                ))
             );
             if (listStillPreparing) {
                 state.tokenTimer = setTimeout(run, 60);
@@ -5516,12 +5739,13 @@ function isCurrentBookDomReady(transition) {
     const entries = document.getElementById('world_popup_entries_list');
     if (!entries) return false;
     const rows = renderedEntries();
-    // 폴디 연동 모드는 현재 책의 네이티브 행을 재생성하지 않고 그대로
-    // 폴더에 옮긴다. 매니저 렌더가 끝나기 전의 평면 행은 준비 완료로 보지
-    // 않아 주입 방식 배지만 먼저 노출되는 중간 화면을 차단한다.
-    if (fastFoldyRenderer?.isActive()) {
-        if (!fastFoldyRenderer.isReady()) return false;
-        return Boolean(rows.length || entries.querySelector('#WIEntryHeaderTitlesPC'));
+    // 연동 모드는 Foldy 원본의 비동기 렌더가 끝나고 실제 목록 노드가 교체된
+    // 뒤에만 준비 완료로 본다. 매니저의 가림 클래스는 헤더 완료까지 유지한다.
+    if (isFoldyLinkedMode()) {
+        if (entries.classList.contains('foldy-lore-pending') || !transition.domMutationObserved) return false;
+        if (!rows.length) return Boolean(entries.querySelector('#WIEntryHeaderTitlesPC'));
+        return rows.length !== transition.previousRows.length
+            || rows.some(row => !transition.previousRowSet.has(row));
     }
     // SillyTavern은 렌더 시작 시 기존 행을 먼저 비운 뒤 항목 템플릿을
     // 비동기로 만든다. 행이 0개라는 이유만으로 완료 처리하면 그 중간의
@@ -5611,6 +5835,7 @@ function beginBookSwitch(book) {
     };
     state.bookSwitch = transition;
     state.pendingBookSwitch = book;
+    if (isFoldyLinkedMode()) markFoldyLinkedPreparing();
     setBookSwitchLoading(true);
     // 실리태번의 showWorldEditor가 이미 같은 데이터를 불러오고 있다. 여기서
     // 다시 loadWorldInfo를 호출하면 첫 방문 시 동일 요청이 겹칠 수 있으므로,
@@ -5659,7 +5884,10 @@ function revealCompletedEntryList(book, entries, headersVerified = false) {
     // 제목·주입 방식·작업 버튼까지만 완성되면 목록을 즉시 공개한다.
     // 토큰 통계, 필터 동기화, 열린 항목의 번역 UI 같은 부가 작업은 이 뒤의
     // finish 단계에서 처리하므로 첫 화면 표시를 막지 않는다.
-    if (fastFoldyRenderer?.isActive() && !fastFoldyRenderer.reveal()) return false;
+    if (isFoldyLinkedMode()) {
+        if (list?.classList.contains('foldy-lore-pending')) return false;
+        clearFoldyLinkedPreparing();
+    }
     finishWorldDrawerOpenLoading();
     if (!state.bookSwitch) setBookSwitchLoading(false);
     hydrateCurrentBookDataAfterReveal(book);
@@ -5669,8 +5897,13 @@ function revealCompletedEntryList(book, entries, headersVerified = false) {
 function enhanceAll() {
     if (state.sorting || state.enhancing) return;
     const liveEntryList = document.getElementById('world_popup_entries_list');
-    if (fastFoldyRenderer?.isActive() && !fastFoldyRenderer.isReady()) {
-        fastFoldyRenderer.schedule('enhance-wait');
+    syncFoldyControlsForMode();
+    if (!isFoldyLinkedMode() && liveEntryList?.classList.contains('foldy-lore-root')) {
+        activateNativeLoreView();
+        return;
+    }
+    if (isFoldyLinkedMode() && liveEntryList?.classList.contains('foldy-lore-pending')) {
+        markFoldyLinkedPreparing();
         return;
     }
     ensureCriticalLayoutStyles();
@@ -5971,20 +6204,6 @@ function init() {
     if (worldInfo.classList.contains('slb-active')) return;
 
     getSettings();
-    fastFoldyRenderer = createFastFoldyRenderer({
-        getBookName: currentBookName,
-        notify,
-        onRendered: () => {
-            state.navigatorDirty = true;
-            if (state.bookSwitch && !state.bookSwitch.ready) {
-                state.bookSwitch.domMutationObserved = true;
-                scheduleBookSwitchReadyCheck(0);
-            } else {
-                scheduleEnhance();
-            }
-        },
-    });
-    fastFoldyRenderer.init();
     applyManagerMode(getSettings().managerMode, {
         persist: state.settingsMigrationNeeded,
         announce: false,
