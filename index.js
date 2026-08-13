@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.43';
+const VERSION = '1.4.44';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -356,7 +356,16 @@ function syncMobileEntryStateBadge(entry) {
                 ? 'vectorized'
                 : 'normal';
     badge.dataset.state = value;
-    badge.textContent = '';
+    // The strategy picker lives inside the badge so it can stay anchored to
+    // the badge without fragile viewport coordinates.  A delayed responsive
+    // stabilization can run between a mobile pointerdown and click; clearing
+    // textContent here used to remove the live picker (and its tapped button)
+    // before the click was delivered.  Clear only stray badge content and
+    // preserve the active picker until its own selection handler closes it.
+    for (const child of Array.from(badge.childNodes)) {
+        if (child instanceof Element && child.id === 'slb-strategy-picker') continue;
+        child.remove();
+    }
     applyBadgeThemeColor(entry, badge);
     badge.title = (value === 'constant'
         ? '상시 주입'
@@ -388,14 +397,20 @@ function applyEntryStrategy(entry, value) {
         'select.world_entry_state',
         'select.entryStateSelector',
     ]);
-    if (!selector || selector.value === value) return;
+    if (!selector) return false;
+    if (selector.value === value) {
+        syncMobileEntryStateBadge(entry);
+        return true;
+    }
     // 네이티브 셀렉트 값을 바꾸고 input을 그대로 쏘면 ST 원본 핸들러가
     // 데이터 갱신·저장을 처리한다. 호출 조건 탭의 셀렉트는 같은 요소라
     // 별도 동기화 없이 값이 항상 일치한다.
     selector.value = value;
     selector.dispatchEvent(new Event('input', { bubbles: true }));
     // 워크스페이스 input 리스너와 무관하게 배지·토큰 요약 동기화를 보장한다.
+    syncMobileEntryStateBadge(entry);
     scheduleEntryInjectionStateSync(entry);
+    return true;
 }
 
 function closeStrategyPicker() {
@@ -417,6 +432,11 @@ function openStrategyPicker(entry, badge) {
     picker.dataset.uid = getUid(entry);
     picker.setAttribute('role', 'menu');
     const current = badge.dataset.state || 'normal';
+    let committedValue = '';
+    let fallbackCloseTimer = 0;
+    const closeIfCurrent = () => {
+        if (document.getElementById('slb-strategy-picker') === picker) closeStrategyPicker();
+    };
     for (const [value, label, title] of [
         ['constant', '🔵', '상시 주입'],
         ['normal', '🟢', '선택 주입'],
@@ -426,14 +446,37 @@ function openStrategyPicker(entry, badge) {
         option.type = 'button';
         option.textContent = label;
         option.title = title;
+        option.dataset.strategy = value;
         option.setAttribute('aria-label', title);
         if (current === value) option.classList.add('is-current');
-        option.addEventListener('click', event => {
-            event.preventDefault();
+        const commit = event => {
+            if (event.type === 'pointerup' && event.button != null && event.button !== 0) return;
+            if (event.cancelable && event.type === 'click') event.preventDefault();
             event.stopPropagation();
-            applyEntryStrategy(entry, value);
-            closeStrategyPicker();
-        });
+            if (!committedValue) {
+                committedValue = value;
+                applyEntryStrategy(entry, value);
+                picker.querySelectorAll('.slb-strategy-picker-option').forEach(item => {
+                    item.classList.toggle('is-current', item === option);
+                });
+            }
+
+            // Keyboard/mouse activation supplies click, so close immediately.
+            // Some mobile WebViews occasionally end a tap at pointerup or
+            // touchend without synthesizing click.  In that path the value is
+            // already saved above and a short fallback closes the popup.  Keep
+            // it connected until the possible click so the parent badge cannot
+            // receive a retargeted synthetic click and reopen the picker.
+            clearTimeout(fallbackCloseTimer);
+            if (event.type === 'click') {
+                closeIfCurrent();
+            } else {
+                fallbackCloseTimer = setTimeout(closeIfCurrent, 320);
+            }
+        };
+        option.addEventListener('pointerup', commit);
+        option.addEventListener('touchend', commit, { passive: true });
+        option.addEventListener('click', commit);
         picker.append(option);
     }
 
@@ -472,6 +515,7 @@ function openStrategyPicker(entry, badge) {
         window.addEventListener('resize', dismissOnScroll, { passive: true });
     }, 0);
     picker.__slbCleanup = () => {
+        clearTimeout(fallbackCloseTimer);
         document.removeEventListener('pointerdown', dismiss, true);
         window.removeEventListener('scroll', dismissOnScroll, { capture: true });
         window.removeEventListener('resize', dismissOnScroll);
