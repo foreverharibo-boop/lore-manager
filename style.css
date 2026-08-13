@@ -657,8 +657,8 @@
     min-width: 0;
 }
 
-/* 로어북 전환 중 이전 책의 행은 숨긴다. 새 책의 네이티브 제목 행이
-   확인되는 즉시 이 상태를 해제하고 확장 UI는 이후 프레임에 나누어 붙인다. */
+/* 로어북 전환 중 이전 책의 행은 숨긴다. 새 책의 제목·주입 방식·작업
+   버튼이 완성되면 해제하고 나머지 부가 UI는 이후 프레임에 붙인다. */
 #WorldInfo.slb-active.slb-book-switching #world_popup_entries_list {
     position: relative;
     box-sizing: border-box;
@@ -676,7 +676,7 @@
 }
 
 #WorldInfo.slb-active.slb-book-switching #world_popup_entries_list::before {
-    content: '로어북 불러오는 중…';
+    content: '로어북을 여는 중입니다.';
     position: absolute;
     inset: 0;
     display: flex;
@@ -4241,7 +4241,7 @@
 
 #WorldInfo.slb-active #world_popup_entries_list.foldy-lore-pending::before,
 #WorldInfo.slb-active #world_popup_entries_list.slb-foldy-settling::before {
-    content: '폴더 정리 중…';
+    content: '폴더를 정리 중입니다.';
     position: absolute;
     inset: 0;
     display: flex;

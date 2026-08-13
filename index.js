@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.39';
+const VERSION = '1.4.40';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -156,8 +156,8 @@ function beginFoldyLayoutSettle(entries) {
         }
 
         // Foldy removes its pending marker immediately after appending the
-        // fragment. One short quiet window coalesces the remaining observer
-        // records so folder creation and item moves produce one enhancement.
+        // fragment. A single animation frame is enough to coalesce the final
+        // observer records without adding an arbitrary fixed delay.
         state.foldyLayoutSettleTimer = setTimeout(() => {
             state.foldyLayoutSettleTimer = null;
             if (!entries.isConnected || entries.classList.contains('foldy-lore-pending')) {
@@ -167,7 +167,7 @@ function beginFoldyLayoutSettle(entries) {
             state.foldyRevealPending = true;
             state.navigatorDirty = true;
             scheduleEnhance();
-        }, 34);
+        }, 0);
     };
 
     state.foldyLayoutSettleRaf = requestAnimationFrame(waitForFoldy);
@@ -5564,7 +5564,7 @@ function scheduleBookSwitchReadyCheck(delay = 32) {
         state.navigatorDirty = true;
         const book = transition.book;
         // 새 책의 네이티브 제목 행을 확인한 뒤에도 가림막은 유지한다.
-        // 로어북 매니저 헤더까지 완성한 enhanceAll의 finish에서만 해제한다.
+        // 로어북 매니저의 제목·주입 방식·작업 버튼까지 완성된 시점에 해제한다.
         finishBookSwitch(book);
         requestAnimationFrame(() => {
             if (currentBookName() === book) scheduleEnhance();
@@ -5630,8 +5630,48 @@ function finishBookSwitch(book) {
     clearTimeout(transition.timer);
     state.bookSwitch = null;
     // 네이티브 행이 생겼다는 이유만으로 여기서 가림막을 먼저 풀면 모바일
-    // 배지와 버튼만 한 프레임 노출된다. enhanceAll의 완료 지점에서 제목과
-    // 헤더까지 전부 정리된 뒤 가림막을 해제한다.
+    // 배지와 버튼만 한 프레임 노출된다. enhanceAll의 헤더 완료 지점에서
+    // 제목과 작업 버튼까지 전부 정리된 뒤 가림막을 해제한다.
+}
+
+function isEntryHeaderReadyForReveal(entry) {
+    if (!entry?.isConnected) return false;
+    if (!entry.dataset.slbHeaderEnhanced) return false;
+    const shell = entry.querySelector('.slb-entry-header-shell');
+    const grid = shell?.querySelector('.slb-header-grid');
+    const title = grid?.querySelector('.slb-title-field');
+    const actions = shell?.querySelector('.slb-header-actions');
+    const titleControl = title?.querySelector('textarea, input');
+    const stateControl = shell?.querySelector('select[name="entryStateSelector"], select[name="entryStatus"], select[name="entryState"], select.WIEntryStatusSelect, select.world_entry_state, select.entryStateSelector');
+    // 접힌 목록에서 실제로 보이는 제목·주입 방식·작업 버튼만 확인한다.
+    // 호출 조건용 필드는 열린 편집기에서 이어서 복구할 수 있으므로, 그 다섯
+    // 필드를 기다리느라 완성된 목록까지 가리는 일은 피한다.
+    return Boolean(shell && grid && titleControl && stateControl && actions);
+}
+
+function revealCompletedEntryList(book, entries) {
+    if (currentBookName() !== book) return false;
+    const liveEntries = renderedEntries();
+    const sameRenderedPage = liveEntries.length === entries.length
+        && liveEntries.every((entry, index) => entry === entries[index]);
+    if (
+        state.enhancePending
+        || !sameRenderedPage
+        || entries.some(entry => !isEntryHeaderReadyForReveal(entry))
+    ) return false;
+
+    // 제목·주입 방식·작업 버튼까지만 완성되면 목록을 즉시 공개한다.
+    // 토큰 통계, 필터 동기화, 열린 항목의 번역 UI 같은 부가 작업은 이 뒤의
+    // finish 단계에서 처리하므로 첫 화면 표시를 막지 않는다.
+    if (state.foldyRevealPending) {
+        const currentEntries = document.getElementById('world_popup_entries_list');
+        if (!currentEntries?.classList.contains('foldy-lore-pending')) {
+            state.foldyRevealPending = false;
+            currentEntries?.classList.remove('slb-foldy-settling');
+        }
+    }
+    if (!state.bookSwitch) setBookSwitchLoading(false);
+    return true;
 }
 
 function enhanceAll() {
@@ -5655,6 +5695,7 @@ function enhanceAll() {
     const batchSize = isNarrowEntryLayout() ? 12 : 18;
     const batchBudgetMs = isNarrowEntryLayout() ? 10 : 12;
     state.enhancing = true;
+    let listRevealed = false;
 
     const finish = () => {
         if (runId !== state.enhanceRunId) return;
@@ -5682,23 +5723,41 @@ function enhanceAll() {
             state.enhancePending = false;
             scheduleEnhance();
         }
-        if (!needsAnotherEnhancePass) {
-            if (state.foldyRevealPending) {
-                state.foldyRevealPending = false;
-                requestAnimationFrame(() => {
-                    const currentEntries = document.getElementById('world_popup_entries_list');
-                    if (!currentEntries?.classList.contains('foldy-lore-pending')) {
-                        currentEntries?.classList.remove('slb-foldy-settling');
-                    }
-                });
-            }
-            if (!state.bookSwitch && currentBookName() === bookAtStart) {
-                setBookSwitchLoading(false);
-            }
+        if (!needsAnotherEnhancePass && !listRevealed) {
+            revealCompletedEntryList(bookAtStart, entries);
         }
     };
 
-    const enhanceBatch = start => {
+    const openedEntries = [];
+    const enhanceEditorBatch = start => {
+        if (runId !== state.enhanceRunId) return;
+        if (currentBookName() !== bookAtStart) {
+            state.enhancing = false;
+            state.enhanceChunkRaf = 0;
+            state.enhancePending = false;
+            scheduleEnhance();
+            return;
+        }
+        const deadline = performance.now() + batchBudgetMs;
+        let index = start;
+        const hardEnd = Math.min(openedEntries.length, start + 3);
+        for (; index < hardEnd; index++) {
+            const entry = openedEntries[index];
+            if (!entry?.isConnected) continue;
+            if (isEntryEditorRendered(entry)) enhanceEntry(entry);
+            if (index > start && performance.now() >= deadline) {
+                index += 1;
+                break;
+            }
+        }
+        if (index < openedEntries.length) {
+            state.enhanceChunkRaf = requestAnimationFrame(() => enhanceEditorBatch(index));
+        } else {
+            finish();
+        }
+    };
+
+    const enhanceHeaderBatch = start => {
         if (runId !== state.enhanceRunId) return;
         if (currentBookName() !== bookAtStart) {
             state.enhancing = false;
@@ -5714,20 +5773,33 @@ function enhanceAll() {
             const entry = entries[index];
             if (!entry?.isConnected) continue;
             enhanceEntryHeader(entry);
-            if (isEntryEditorRendered(entry)) enhanceEntry(entry);
+            if (isEntryEditorRendered(entry)) openedEntries.push(entry);
             if (index > start && performance.now() >= deadline) {
                 index += 1;
                 break;
             }
         }
         if (index < entries.length) {
-            state.enhanceChunkRaf = requestAnimationFrame(() => enhanceBatch(index));
+            state.enhanceChunkRaf = requestAnimationFrame(() => enhanceHeaderBatch(index));
+            return;
+        }
+
+        // 현재 페이지의 헤더가 모두 완성된 순간 먼저 공개한다. 브라우저가
+        // 이 상태를 실제로 그릴 수 있도록 상세 편집기 변환은 다음 프레임부터
+        // 수행한다.
+        listRevealed = revealCompletedEntryList(bookAtStart, entries);
+        if (!listRevealed && state.enhancePending) {
+            finish();
+            return;
+        }
+        if (openedEntries.length) {
+            state.enhanceChunkRaf = requestAnimationFrame(() => enhanceEditorBatch(0));
         } else {
             finish();
         }
     };
 
-    enhanceBatch(0);
+    enhanceHeaderBatch(0);
 }
 
 function scheduleEnhance() {
