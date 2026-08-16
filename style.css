@@ -294,6 +294,20 @@
     white-space: nowrap;
 }
 
+#WorldInfo.slb-active button.slb-lang-badge {
+    appearance: none;
+    border: 1px solid color-mix(in srgb, var(--slb-accent) 38%, transparent);
+    font: inherit;
+    line-height: 1.2;
+    cursor: pointer;
+}
+
+#WorldInfo.slb-active button.slb-lang-badge:hover,
+#WorldInfo.slb-active button.slb-lang-badge:focus-visible {
+    background: color-mix(in srgb, var(--slb-accent) 28%, transparent);
+    outline: none;
+}
+
 #slb-ai-tools .slb-field {
     display: flex;
     flex: 1 1 180px;
@@ -312,11 +326,6 @@
 #slb-ai-tools .slb-profile-field {
     flex: 0 1 360px;
     max-width: 360px;
-}
-
-#slb-ai-tools .slb-language-field {
-    flex: 0 1 190px;
-    max-width: 190px;
 }
 
 #slb-ai-tools .slb-output-tokens-field {
@@ -1041,7 +1050,7 @@
     border-top: 1px solid var(--slb-border);
 }
 
-/* '지금 번역 반영' 버튼이 좁은 공간에서 세로로 쪼개지지 않게 가로 고정 */
+/* 아래 번역 → 위 원문 버튼이 좁은 공간에서 세로로 쪼개지지 않게 가로 고정 */
 #WorldInfo.slb-active .slb-apply-translation {
     display: inline-flex !important;
     flex: 0 0 auto !important;
@@ -1205,8 +1214,7 @@
         grid-template-areas:
             "provider provider"
             "profile profile"
-            "language test"
-            "tokens tokens";
+            "tokens test";
         gap: 8px;
         align-items: end;
     }
@@ -1225,15 +1233,9 @@
         max-width: none;
     }
 
-    #slb-ai-tools .slb-language-field {
-        grid-area: language;
-        grid-column: 1;
-        width: 100%;
-        max-width: none;
-    }
-
     #slb-ai-tools .slb-output-tokens-field {
         grid-area: tokens;
+        grid-column: 1;
         width: min(150px, 100%);
         max-width: none;
         justify-self: start;

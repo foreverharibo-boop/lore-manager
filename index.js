@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.57';
+const VERSION = '1.4.58';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -44,9 +44,14 @@ const BACKUP_SCHEMA_VERSION = 1;
 const BACKUP_IDLE_DELAY = 3 * 60 * 1000;
 const BACKUP_CONTINUOUS_INTERVAL = 30 * 60 * 1000;
 const BACKUP_RETENTION_TOTAL = 20;
+const ENTRY_LANGUAGE_ENGLISH = 'English';
+const ENTRY_LANGUAGE_KOREAN = 'Korean';
+const DEFAULT_ENTRY_LANGUAGE_PAIR = Object.freeze({
+    sourceLanguage: ENTRY_LANGUAGE_ENGLISH,
+    translationLanguage: ENTRY_LANGUAGE_KOREAN,
+});
 const DEFAULT_SETTINGS = Object.freeze({
     profileId: '',
-    language: 'Korean',
     translationProvider: 'profile',
     translationPrompt: '',
     aiOutputTokens: DEFAULT_AI_OUTPUT_TOKENS,
@@ -63,6 +68,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     translateMissingOnOpen: true,
     autoTranslateSource: true,
     autoSyncToSource: true,
+    entryLanguagePairs: {},
     translations: {},
 });
 
@@ -73,10 +79,8 @@ function normalizeAIOutputTokens(value) {
 }
 
 const GOOGLE_LANGUAGE_CODES = Object.freeze({
-    'Korean': 'ko',
-    'English': 'en',
-    'Japanese': 'ja',
-    'Chinese (Simplified)': 'zh-CN',
+    [ENTRY_LANGUAGE_KOREAN]: 'ko',
+    [ENTRY_LANGUAGE_ENGLISH]: 'en',
 });
 
 const state = {
@@ -232,6 +236,12 @@ function getSettings() {
         delete settings.foldyFolderDeletionTombstones;
         state.settingsMigrationNeeded = true;
     }
+    if ('language' in settings) {
+        // 1.4.58부터 번역 방향은 전역 설정이 아니라 각 항목의 EN/KO
+        // 배지에 저장된다. 예전 전역 언어 값은 더 이상 사용하지 않는다.
+        delete settings.language;
+        state.settingsMigrationNeeded = true;
+    }
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
         if (!(key in settings)) {
             settings[key] = structuredClone(value);
@@ -240,6 +250,9 @@ function getSettings() {
 
     if (!settings.translations || typeof settings.translations !== 'object' || Array.isArray(settings.translations)) {
         settings.translations = {};
+    }
+    if (!settings.entryLanguagePairs || typeof settings.entryLanguagePairs !== 'object' || Array.isArray(settings.entryLanguagePairs)) {
+        settings.entryLanguagePairs = {};
     }
 
     settings.aiOutputTokens = normalizeAIOutputTokens(settings.aiOutputTokens);
@@ -993,6 +1006,62 @@ function translationKey(book, uid) {
     return `${book}\u241f${uid}`;
 }
 
+function normalizeEntryLanguage(language) {
+    if (language === ENTRY_LANGUAGE_KOREAN) return ENTRY_LANGUAGE_KOREAN;
+    if (language === ENTRY_LANGUAGE_ENGLISH) return ENTRY_LANGUAGE_ENGLISH;
+    return null;
+}
+
+function oppositeEntryLanguage(language) {
+    return language === ENTRY_LANGUAGE_KOREAN
+        ? ENTRY_LANGUAGE_ENGLISH
+        : ENTRY_LANGUAGE_KOREAN;
+}
+
+function entryLanguageBadge(language) {
+    return language === ENTRY_LANGUAGE_KOREAN ? 'KO' : 'EN';
+}
+
+function getEntryLanguagePair(book, uid) {
+    const settings = getSettings();
+    const key = translationKey(book, uid);
+    const saved = settings.entryLanguagePairs[key];
+    const savedSource = normalizeEntryLanguage(saved?.sourceLanguage);
+    const savedTranslation = normalizeEntryLanguage(saved?.translationLanguage);
+    if (savedSource && savedTranslation && savedSource !== savedTranslation) {
+        return {
+            sourceLanguage: savedSource,
+            translationLanguage: savedTranslation,
+        };
+    }
+
+    // 1.4.57 이하 번역본은 목표 언어만 저장했다. 기존 한국어 번역은
+    // EN→KO, 기존 영어 번역은 KO→EN으로 자연스럽게 이어받는다.
+    const legacyRecord = settings.translations[key];
+    const legacyTranslation = normalizeEntryLanguage(legacyRecord?.language);
+    const legacySource = normalizeEntryLanguage(legacyRecord?.sourceLanguage)
+        || (legacyTranslation ? oppositeEntryLanguage(legacyTranslation) : null);
+    if (legacySource && legacyTranslation && legacySource !== legacyTranslation) {
+        return {
+            sourceLanguage: legacySource,
+            translationLanguage: legacyTranslation,
+        };
+    }
+
+    return { ...DEFAULT_ENTRY_LANGUAGE_PAIR };
+}
+
+function saveEntryLanguagePair(book, uid, sourceLanguage, translationLanguage) {
+    const source = normalizeEntryLanguage(sourceLanguage) || ENTRY_LANGUAGE_ENGLISH;
+    const translation = normalizeEntryLanguage(translationLanguage) || oppositeEntryLanguage(source);
+    const pair = source === translation
+        ? { sourceLanguage: source, translationLanguage: oppositeEntryLanguage(source) }
+        : { sourceLanguage: source, translationLanguage: translation };
+    getSettings().entryLanguagePairs[translationKey(book, uid)] = pair;
+    saveSettingsDebounced();
+    return pair;
+}
+
 function hashText(value) {
     const text = String(value ?? '');
     let hash = 2166136261;
@@ -1045,18 +1114,18 @@ function getAIRequestErrorMessage(error) {
     return messages[0] || 'API 요청에 실패했습니다.';
 }
 
-function findTranslationRecord(book, uid, source) {
+function findTranslationRecord(book, uid, source, translationLanguage) {
     const settings = getSettings();
     const exactKey = translationKey(book, uid);
     const exact = settings.translations[exactKey];
-    if (exact) return exact;
+    if (exact && exact.language === translationLanguage) return exact;
 
     const sourceHash = hashText(source);
     const fallback = Object.values(settings.translations).find(record => (
         record
         && String(record.uid) === String(uid)
         && record.sourceHash === sourceHash
-        && record.language === settings.language
+        && record.language === translationLanguage
     ));
 
     if (fallback) {
@@ -1068,9 +1137,9 @@ function findTranslationRecord(book, uid, source) {
     return null;
 }
 
-function getTranslationReflectionBaseline(record, source) {
+function getTranslationReflectionBaseline(record, source, translationLanguage) {
     const sourceHash = hashText(source);
-    if (!record || record.language !== getSettings().language) return { text: '', sourceHash: '' };
+    if (!record || record.language !== translationLanguage) return { text: '', sourceHash: '' };
     if ('syncedText' in record || 'syncedSourceHash' in record) {
         return record.syncedSourceHash === sourceHash
             ? { text: String(record.syncedText ?? ''), sourceHash }
@@ -1084,23 +1153,27 @@ function getTranslationReflectionBaseline(record, source) {
 function saveTranslationRecord(book, uid, source, translation, options = {}) {
     const settings = getSettings();
     const key = translationKey(book, uid);
+    const sourceLanguage = normalizeEntryLanguage(options.sourceLanguage) || ENTRY_LANGUAGE_ENGLISH;
+    const translationLanguage = normalizeEntryLanguage(options.translationLanguage)
+        || oppositeEntryLanguage(sourceLanguage);
     const record = {
         book,
         uid: String(uid),
-        language: settings.language,
+        sourceLanguage,
+        language: translationLanguage,
         sourceHash: hashText(source),
         text: String(translation ?? ''),
         updatedAt: Date.now(),
     };
     const baseline = options.baseline;
-    if (!options.markSynced && baseline?.sourceHash && (
-        baseline.sourceHash !== record.sourceHash
-        || String(baseline.text ?? '') !== record.text
-    )) {
-        record.syncedText = String(baseline.text ?? '');
-        record.syncedSourceHash = String(baseline.sourceHash);
+    if (!options.markSynced) {
+        // 빈 문자열도 의도적인 "동기화 기준 없음" 상태다. 필드를 항상
+        // 남겨야 새 번역문을 기존 원문과 동기화된 것으로 오인하지 않는다.
+        record.syncedText = String(baseline?.text ?? '');
+        record.syncedSourceHash = String(baseline?.sourceHash ?? '');
     }
     settings.translations[key] = record;
+    settings.entryLanguagePairs[key] = { sourceLanguage, translationLanguage };
     saveSettingsDebounced();
     scheduleAutomaticLorebookBackup(book);
 }
@@ -1475,8 +1548,8 @@ async function runQueuedGoogleTranslation(text, lang, onProgress) {
     return unmaskMacros(translated, macros);
 }
 
-function googleTranslate(text, onProgress = null) {
-    const lang = GOOGLE_LANGUAGE_CODES[getSettings().language] || 'ko';
+function googleTranslate(text, targetLanguage, onProgress = null) {
+    const lang = GOOGLE_LANGUAGE_CODES[normalizeEntryLanguage(targetLanguage)] || 'ko';
     return googleTranslateToLanguage(text, lang, onProgress);
 }
 
@@ -1488,26 +1561,12 @@ function googleTranslateToLanguage(text, lang, onProgress = null) {
     return job;
 }
 
-function detectOriginalLanguageCode(source) {
-    const text = String(source ?? '');
-    const counts = {
-        ko: (text.match(/[\uac00-\ud7af]/g) || []).length,
-        ja: (text.match(/[\u3040-\u30ff]/g) || []).length,
-        zh: (text.match(/[\u3400-\u9fff]/g) || []).length,
-        en: (text.match(/[A-Za-z]/g) || []).length,
-    };
-    if (counts.ja > 0 && counts.ja + counts.zh >= Math.max(counts.ko, counts.en)) return 'ja';
-    if (counts.ko > Math.max(counts.ja + counts.zh, counts.en)) return 'ko';
-    if (counts.zh > Math.max(counts.ko, counts.en)) return 'zh-CN';
-    return 'en';
-}
-
-async function translateText(source, onProgress = null) {
+async function translateText(source, targetLanguage, onProgress = null) {
     const settings = getSettings();
+    const language = normalizeEntryLanguage(targetLanguage) || ENTRY_LANGUAGE_KOREAN;
     if (settings.translationProvider === 'google') {
-        return googleTranslate(source, onProgress);
+        return googleTranslate(source, language, onProgress);
     }
-    const language = settings.language;
     const customPrompt = settings.translationPrompt?.trim();
     const prompt = [
         `Translate the lorebook entry below into ${language}.`,
@@ -1643,9 +1702,12 @@ async function reflectTranslationSegmentInSource({
     editedTranslationSegments,
     contextBefore,
     contextAfter,
-    originalLanguageCode,
+    sourceLanguage,
+    translationLanguage,
 }) {
-    const language = getSettings().language;
+    const normalizedSourceLanguage = normalizeEntryLanguage(sourceLanguage) || ENTRY_LANGUAGE_ENGLISH;
+    const normalizedTranslationLanguage = normalizeEntryLanguage(translationLanguage)
+        || oppositeEntryLanguage(normalizedSourceLanguage);
     const expectedSegments = editedTranslationSegments.length;
     if (!expectedSegments) return [];
     if (editedTranslationSegments.every(segment => !segment.trim())) return [...editedTranslationSegments];
@@ -1653,7 +1715,7 @@ async function reflectTranslationSegmentInSource({
     if (getSettings().translationProvider === 'google') {
         const revised = await googleTranslateToLanguage(
             editedTranslationSegments.join('\n'),
-            originalLanguageCode,
+            GOOGLE_LANGUAGE_CODES[normalizedSourceLanguage],
         );
         const revisedSegments = splitReflectionDocument(revised).segments;
         if (revisedSegments.length !== expectedSegments) {
@@ -1663,8 +1725,8 @@ async function reflectTranslationSegmentInSource({
     }
 
     const prompt = [
-        `The user edited ${language} translation lines from a lorebook entry.`,
-        'Return a replacement for ONLY the corresponding original-language source lines.',
+        `The user edited ${normalizedTranslationLanguage} translation lines from a lorebook entry.`,
+        `Return a replacement in ${normalizedSourceLanguage} for ONLY the corresponding source lines.`,
         'Do not rewrite, summarize, or return the read-only neighboring context.',
         'Within the source segment, keep wording identical wherever the edited translation did not change its meaning.',
         'If the current source segment is empty, translate the newly added lines into the same source language and style as the context.',
@@ -1677,10 +1739,10 @@ async function reflectTranslationSegmentInSource({
         '=== CURRENT SOURCE SEGMENT ===',
         sourceSegments.join('\n') || '(empty insertion)',
         '',
-        `=== PREVIOUS ${language.toUpperCase()} TRANSLATION SEGMENT ===`,
+        `=== PREVIOUS ${normalizedTranslationLanguage.toUpperCase()} TRANSLATION SEGMENT ===`,
         previousTranslationSegments.join('\n') || '(empty insertion)',
         '',
-        `=== EDITED ${language.toUpperCase()} TRANSLATION SEGMENT ===`,
+        `=== EDITED ${normalizedTranslationLanguage.toUpperCase()} TRANSLATION SEGMENT ===`,
         editedTranslationSegments.join('\n'),
         '',
         '=== READ-ONLY SOURCE CONTEXT AFTER ===',
@@ -1719,7 +1781,13 @@ function assertOnlyMappedSourceSegmentsChanged(sourceSegments, revisedSegments, 
     }
 }
 
-async function reflectTranslationChangesInSource(source, previousTranslation, editedTranslation) {
+async function reflectTranslationChangesInSource(
+    source,
+    previousTranslation,
+    editedTranslation,
+    sourceLanguage,
+    translationLanguage,
+) {
     const sourceDocument = splitReflectionDocument(source);
     const previousDocument = splitReflectionDocument(previousTranslation);
     const editedDocument = splitReflectionDocument(editedTranslation);
@@ -1742,7 +1810,9 @@ async function reflectTranslationChangesInSource(source, previousTranslation, ed
         }
     }
 
-    const originalLanguageCode = detectOriginalLanguageCode(source);
+    const normalizedSourceLanguage = normalizeEntryLanguage(sourceLanguage) || ENTRY_LANGUAGE_ENGLISH;
+    const normalizedTranslationLanguage = normalizeEntryLanguage(translationLanguage)
+        || oppositeEntryLanguage(normalizedSourceLanguage);
     let firstFailureReason = '';
     for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
@@ -1758,7 +1828,8 @@ async function reflectTranslationChangesInSource(source, previousTranslation, ed
                         editedTranslationSegments,
                         contextBefore: sourceDocument.segments[hunk.oldStart - 1] ?? '',
                         contextAfter: sourceDocument.segments[hunk.oldEnd] ?? '',
-                        originalLanguageCode,
+                        sourceLanguage: normalizedSourceLanguage,
+                        translationLanguage: normalizedTranslationLanguage,
                     })
                     : [];
                 replacements.push({ ...hunk, revisedSegments });
@@ -1784,7 +1855,8 @@ async function reflectTranslationChangesInSource(source, previousTranslation, ed
                 retried: attempt > 0,
                 firstFailureReason,
                 provider: getSettings().translationProvider,
-                originalLanguageCode,
+                sourceLanguage: normalizedSourceLanguage,
+                translationLanguage: normalizedTranslationLanguage,
             };
         } catch (error) {
             const reason = error?.message || '알 수 없는 검증 오류';
@@ -2064,9 +2136,6 @@ function syncAutoControls() {
     document.querySelectorAll('.slb-entry-auto-sync').forEach(input => {
         input.checked = checked;
     });
-    document.querySelectorAll('.slb-apply-translation').forEach(button => {
-        button.style.display = checked ? 'none' : '';
-    });
 }
 
 function backupRequest(request) {
@@ -2272,7 +2341,14 @@ function replaceLorebookTranslations(book, records) {
         const record = structuredClone(source);
         record.book = book;
         record.uid = String(record.uid);
-        settings.translations[translationKey(book, record.uid)] = record;
+        const key = translationKey(book, record.uid);
+        settings.translations[key] = record;
+        const translationLanguage = normalizeEntryLanguage(record.language);
+        const sourceLanguage = normalizeEntryLanguage(record.sourceLanguage)
+            || (translationLanguage ? oppositeEntryLanguage(translationLanguage) : null);
+        if (sourceLanguage && translationLanguage && sourceLanguage !== translationLanguage) {
+            settings.entryLanguagePairs[key] = { sourceLanguage, translationLanguage };
+        }
     }
     saveSettingsDebounced();
 }
@@ -2929,19 +3005,13 @@ function createAIBar() {
                         <option value="google">구글 번역 (무료)</option>
                     </select></label>
                     <label class="slb-field slb-profile-field"><small>AI 전용 연결 프로필</small><select id="slb-profile" class="text_pole"></select></label>
-                    <label class="slb-field slb-language-field"><small>번역 언어</small><select id="slb-language" class="text_pole">
-                        <option value="Korean">한국어</option>
-                        <option value="English">영어</option>
-                        <option value="Japanese">일본어</option>
-                        <option value="Chinese (Simplified)">중국어(간체)</option>
-                    </select></label>
                     <label class="slb-field slb-output-tokens-field" title="AI 번역·AI 수정·번역본의 원문 반영에 적용됩니다."><small>AI 출력 토큰</small><input id="slb-output-tokens" class="text_pole" type="number" min="512" max="65536" step="512" inputmode="numeric"></label>
                     <button type="button" id="slb-test-profile" class="menu_button"><i class="fa-solid fa-plug-circle-check"></i> 연결 테스트</button>
                 </div>
                 <label class="slb-field slb-prompt-field"><small>번역 추가 지시문 · AI 프로필 모드에서만 적용</small>
-                    <textarea id="slb-translate-prompt" class="text_pole" rows="3" placeholder="번역 언어는 위 설정을 자동으로 따릅니다. 문체·존칭·용어 같은 추가 요구사항만 적어주세요. 예) 대사는 반말로, 지문은 건조한 문어체로. (구글 번역에는 적용되지 않습니다)"></textarea>
+                    <textarea id="slb-translate-prompt" class="text_pole" rows="3" placeholder="번역 언어는 각 항목의 원문 EN/KO · 번역 KO/EN 배지를 따릅니다. 문체·존칭·용어 같은 추가 요구사항만 적어주세요. 예) 대사는 반말로, 지문은 건조한 문어체로. (구글 번역에는 적용되지 않습니다)"></textarea>
                     <span class="slb-prompt-meta">
-                        <small class="slb-ai-note">AI 수정·키워드 추천은 전용 프로필을 사용합니다. 구글 번역 모드의 원문 부분 반영은 무료 구글 역번역을 사용합니다.</small>
+                        <small class="slb-ai-note">항목의 EN/KO 배지를 누르면 방향이 바뀝니다. AI 수정·키워드 추천은 전용 프로필을 사용하며, 구글 번역 모드의 원문 반영은 무료 구글 번역을 사용합니다.</small>
                         <small id="slb-ai-status">확장 탭에서 번역 방식을 설정해주세요.</small>
                     </span>
                 </label>
@@ -3011,7 +3081,6 @@ function createAIBar() {
     const settings = getSettings();
     const provider = document.getElementById('slb-provider');
     const profile = document.getElementById('slb-profile');
-    const language = document.getElementById('slb-language');
     const outputTokens = document.getElementById('slb-output-tokens');
     const optionsLocation = document.getElementById('slb-options-location');
     const autoBackupEnabled = document.getElementById('slb-auto-backup-enabled');
@@ -3030,7 +3099,6 @@ function createAIBar() {
 
     const translatePrompt = document.getElementById('slb-translate-prompt');
     provider.value = settings.translationProvider;
-    language.value = settings.language;
     outputTokens.value = String(settings.aiOutputTokens);
     optionsLocation.value = settings.quickOptionsLocation;
     autoBackupEnabled.checked = settings.autoBackupEnabled;
@@ -3089,11 +3157,6 @@ function createAIBar() {
         settings.profileId = profile.value;
         saveSettingsDebounced();
         notify(profile.value ? '로어북 AI 전용 프로필이 저장되었습니다.' : '전용 프로필을 선택해주세요.');
-    });
-    language.addEventListener('change', () => {
-        settings.language = language.value;
-        saveSettingsDebounced();
-        scheduleEnhance();
     });
     outputTokens.addEventListener('change', () => {
         const value = normalizeAIOutputTokens(outputTokens.value);
@@ -3215,7 +3278,7 @@ function createAIBar() {
         button.disabled = true;
         try {
             if (getSettings().translationProvider === 'google') {
-                const sample = await googleTranslate('Hello, world.');
+                const sample = await googleTranslate('Hello, world.', ENTRY_LANGUAGE_KOREAN);
                 if (!sample.trim()) throw new Error('구글 번역 응답이 비어 있습니다.');
                 notify(`구글 번역 연결 성공 · 예시: ${sample.trim().slice(0, 40)}`, 'success');
             } else {
@@ -3244,8 +3307,8 @@ function createQuickTranslationOptions() {
         options.id = 'slb-quick-options';
         options.innerHTML = `
             <label><input type="checkbox" id="slb-translate-missing"> 번역본 없는 항목을 열 때 자동 번역</label>
-            <label><input type="checkbox" id="slb-auto-translate"> 원문 변경 시 자동 번역</label>
-            <label><input type="checkbox" id="slb-auto-sync"> 번역 변경 시 원문 자동 반영</label>`;
+            <label><input type="checkbox" id="slb-auto-translate"> 위 원문 변경 시 아래 자동 번역</label>
+            <label><input type="checkbox" id="slb-auto-sync"> 아래 번역 변경 시 위 원문 자동 반영</label>`;
     }
 
     if (options.dataset.slbBound === VERSION) return options;
@@ -4766,19 +4829,24 @@ function markTranslationSynced(ui, source, translation) {
         text: String(translation ?? ''),
         sourceHash: hashText(source),
     };
-    saveTranslationRecord(ui.book, ui.uid, source, translation, { markSynced: true });
+    saveTranslationRecord(ui.book, ui.uid, source, translation, {
+        markSynced: true,
+        sourceLanguage: ui.sourceLanguage,
+        translationLanguage: ui.translationLanguage,
+    });
 }
 
 function savePendingTranslation(ui, translation) {
     saveTranslationRecord(ui.book, ui.uid, ui.source.value, translation, {
         baseline: ui.reflectionBaseline,
+        sourceLanguage: ui.sourceLanguage,
+        translationLanguage: ui.translationLanguage,
     });
 }
 
 function updateEntrySyncMode(ui) {
     const enabled = getSettings().autoSyncToSource;
     ui.autoSync.checked = enabled;
-    ui.applyButton.style.display = enabled ? 'none' : '';
 }
 
 function scheduleSourceTranslation(ui) {
@@ -4790,43 +4858,54 @@ function scheduleSourceTranslation(ui) {
 function scheduleTranslationReflection(ui) {
     const key = `${ui.book}:${ui.uid}`;
     clearTimeout(state.translationTimers.get(key));
-    state.translationTimers.set(key, setTimeout(() => reflectEntryTranslation(ui), 1400));
+    state.translationTimers.set(key, setTimeout(() => reflectEntryTranslation(ui, { manual: false }), 1400));
 }
 
 async function translateEntrySource(ui, force = false, background = false) {
     if (ui.flags.writingSource || ui.flags.translating) return;
     const settings = getSettings();
     const source = ui.source.value;
-    if (!source.trim()) return;
+    const sourceLanguage = ui.sourceLanguage;
+    const translationLanguage = ui.translationLanguage;
+    const sourceBadge = entryLanguageBadge(sourceLanguage);
+    const translationBadge = entryLanguageBadge(translationLanguage);
+    if (!source.trim()) {
+        ui.status.textContent = `위 ${sourceBadge} 원문이 비어 있습니다. 아래 ${translationBadge} 번역에 내용을 넣고 ${sourceBadge} 원문으로 번역할 수 있습니다.`;
+        return;
+    }
     if (!canTranslate()) {
         ui.status.textContent = '확장 탭에서 번역 방식(전용 프로필 또는 구글 번역)을 설정해주세요.';
         return;
     }
     if (!force && !settings.autoTranslateSource) {
-        ui.status.textContent = '원문이 변경됨 · 다시 번역을 눌러주세요.';
+        ui.status.textContent = `${sourceBadge} 원문이 변경됨 · ${translationBadge}로 번역 버튼을 눌러주세요.`;
         return;
     }
 
     ui.flags.translating = true;
     if (background) {
         ui.translationPane.classList.add('slb-pane-busy');
-        ui.status.textContent = '번역본이 없어 백그라운드에서 번역하는 중…';
+        ui.status.textContent = `${translationBadge} 번역본이 없어 백그라운드에서 번역하는 중…`;
     } else {
-        setEntryBusy(ui, true, '원문을 번역하는 중…');
+        setEntryBusy(ui, true, `${sourceBadge} 원문을 ${translationBadge}로 번역하는 중…`);
     }
     try {
-        const translated = await translateText(source, (current, total) => {
-            if (total > 1) ui.status.textContent = `긴 원문 분할 번역 중… ${current}/${total}`;
+        const translated = await translateText(source, translationLanguage, (current, total) => {
+            if (total > 1) ui.status.textContent = `긴 ${sourceBadge} 원문 분할 번역 중… ${current}/${total}`;
         });
-        if (ui.source.value !== source) {
-            ui.status.textContent = '번역 중 원문이 다시 변경되어 이전 결과를 적용하지 않았습니다.';
+        if (
+            ui.source.value !== source
+            || ui.sourceLanguage !== sourceLanguage
+            || ui.translationLanguage !== translationLanguage
+        ) {
+            ui.status.textContent = '번역 중 내용이나 EN/KO 방향이 변경되어 이전 결과를 적용하지 않았습니다.';
             return;
         }
         ui.flags.writingTranslation = true;
         ui.translation.value = translated;
         ui.flags.writingTranslation = false;
         markTranslationSynced(ui, source, translated);
-        ui.status.textContent = '현재 원문을 기준으로 번역되었습니다.';
+        ui.status.textContent = `현재 ${sourceBadge} 원문을 기준으로 ${translationBadge} 번역이 생성되었습니다.`;
     } catch (error) {
         ui.status.textContent = error.message || '번역에 실패했습니다.';
         notify(ui.status.textContent, 'error');
@@ -4837,28 +4916,77 @@ async function translateEntrySource(ui, force = false, background = false) {
     }
 }
 
-async function reflectEntryTranslation(ui) {
+async function reflectEntryTranslation(ui, { manual = false } = {}) {
     if (ui.flags.writingTranslation || ui.flags.translating || ui.flags.composingTranslation) return;
     const translation = ui.translation.value;
     const source = ui.source.value;
-    if (!translation.trim() || !source.trim()) return;
-    const settings = getSettings();
-    if (settings.translationProvider !== 'google' && !settings.profileId) {
-        ui.status.textContent = 'AI 프로필 모드의 원문 반영에는 전용 연결 프로필이 필요합니다.';
+    const sourceLanguage = ui.sourceLanguage;
+    const translationLanguage = ui.translationLanguage;
+    const sourceBadge = entryLanguageBadge(sourceLanguage);
+    const translationBadge = entryLanguageBadge(translationLanguage);
+    if (!translation.trim()) {
+        ui.status.textContent = `아래 ${translationBadge} 번역에 번역할 내용을 입력해주세요.`;
+        return;
+    }
+    if (!canTranslate()) {
+        ui.status.textContent = '확장 탭에서 번역 방식(전용 프로필 또는 구글 번역)을 설정해주세요.';
         return;
     }
     const baseline = ui.reflectionBaseline;
-    if (!baseline?.text || baseline.sourceHash !== hashText(source)) {
-        ui.status.textContent = '부분 반영 기준이 없습니다. 먼저 다시 번역한 뒤 번역본을 수정해주세요.';
+    const baselineValid = Boolean(baseline?.text) && baseline.sourceHash === hashText(source);
+    const needsFullTranslation = !source.trim() || !baselineValid;
+    if (needsFullTranslation && source.trim() && !manual) {
+        ui.status.textContent = `부분 반영 기준이 없습니다. “${sourceBadge} 원문으로 번역”을 눌러 위 원문 전체를 교체할 수 있습니다.`;
         return;
     }
 
     ui.flags.translating = true;
-    setEntryBusy(ui, true, '수정된 번역 구간만 원문에 반영하고 검증하는 중…');
+    setEntryBusy(ui, true, needsFullTranslation
+        ? `${translationBadge} 번역 전체를 ${sourceBadge} 원문으로 번역하는 중…`
+        : `수정된 ${translationBadge} 번역 구간만 ${sourceBadge} 원문에 반영하고 검증하는 중…`);
     try {
-        const result = await reflectTranslationChangesInSource(source, baseline.text, translation);
-        if (ui.translation.value !== translation || ui.source.value !== source) {
-            ui.status.textContent = '반영 중 내용이 다시 변경되어 이전 결과를 적용하지 않았습니다.';
+        if (needsFullTranslation) {
+            const revisedSource = await translateText(translation, sourceLanguage, (current, total) => {
+                if (total > 1) ui.status.textContent = `긴 ${translationBadge} 번역 분할 처리 중… ${current}/${total}`;
+            });
+            if (
+                ui.translation.value !== translation
+                || ui.source.value !== source
+                || ui.sourceLanguage !== sourceLanguage
+                || ui.translationLanguage !== translationLanguage
+            ) {
+                ui.status.textContent = '반영 중 내용이나 EN/KO 방향이 변경되어 이전 결과를 적용하지 않았습니다.';
+                return;
+            }
+            assertProtectedStructurePreserved(translation, revisedSource);
+            ui.flags.writingSource = true;
+            try {
+                ui.source.value = revisedSource;
+                ui.source.dispatchEvent(new Event('input', { bubbles: true }));
+            } finally {
+                ui.flags.writingSource = false;
+            }
+            markTranslationSynced(ui, revisedSource, translation);
+            ui.status.textContent = source.trim()
+                ? `위 ${sourceBadge} 원문 전체를 아래 ${translationBadge} 번역 기준으로 교체했습니다.`
+                : `아래 ${translationBadge} 번역으로 위 ${sourceBadge} 원문을 생성했습니다.`;
+            return;
+        }
+
+        const result = await reflectTranslationChangesInSource(
+            source,
+            baseline.text,
+            translation,
+            sourceLanguage,
+            translationLanguage,
+        );
+        if (
+            ui.translation.value !== translation
+            || ui.source.value !== source
+            || ui.sourceLanguage !== sourceLanguage
+            || ui.translationLanguage !== translationLanguage
+        ) {
+            ui.status.textContent = '반영 중 내용이나 EN/KO 방향이 변경되어 이전 결과를 적용하지 않았습니다.';
             return;
         }
         if (!result.changedRegions) {
@@ -4866,13 +4994,16 @@ async function reflectEntryTranslation(ui) {
             return;
         }
         ui.flags.writingSource = true;
-        ui.source.value = result.source;
-        ui.source.dispatchEvent(new Event('input', { bubbles: true }));
-        ui.flags.writingSource = false;
+        try {
+            ui.source.value = result.source;
+            ui.source.dispatchEvent(new Event('input', { bubbles: true }));
+        } finally {
+            ui.flags.writingSource = false;
+        }
         markTranslationSynced(ui, result.source, translation);
         ui.status.textContent = result.retried
-            ? `첫 결과를 폐기하고 자동 재생성하여 ${result.changedRegions}개 구간만 반영했습니다.`
-            : `수정된 ${result.changedRegions}개 구간만 원문에 반영되었습니다.`;
+            ? `첫 결과를 폐기하고 자동 재생성하여 ${result.changedRegions}개 구간만 ${sourceBadge} 원문에 반영했습니다.`
+            : `수정된 ${result.changedRegions}개 구간만 ${sourceBadge} 원문에 반영되었습니다.`;
         if (result.retried) {
             notify(`첫 반영 결과를 폐기하고 1회 자동 재생성했습니다. 실패 이유: ${result.firstFailureReason}`, 'warning');
         }
@@ -4937,14 +5068,83 @@ async function runTranslationRevision(ui) {
     }
 }
 
-function buildEditorHeader(title, badge, actions = []) {
+function setMenuButtonLabel(button, label, title = '') {
+    const text = button?.querySelector('span');
+    if (text) text.textContent = label;
+    if (button && title) button.title = title;
+}
+
+function buildEditorHeader(title, badge, actions = [], languageRole = '') {
     const header = createElement('div', 'slb-entry-editor-head');
     const heading = createElement('div', 'slb-entry-editor-title');
-    heading.append(createElement('span', '', title), createElement('span', 'slb-lang-badge', badge));
+    const languageButton = createElement('button', 'slb-lang-badge', badge);
+    languageButton.type = 'button';
+    languageButton.dataset.languageRole = languageRole;
+    heading.append(createElement('span', '', title), languageButton);
     const actionRow = createElement('div', 'slb-entry-actions');
     actionRow.append(...actions);
     header.append(heading, actionRow);
     return header;
+}
+
+function updateEntryLanguageUI(ui) {
+    const sourceBadge = entryLanguageBadge(ui.sourceLanguage);
+    const translationBadge = entryLanguageBadge(ui.translationLanguage);
+    const nextSourceBadge = translationBadge;
+    const nextTranslationBadge = sourceBadge;
+    const switchLabel = `언어 방향 전환: 원문 ${nextSourceBadge} · 번역 ${nextTranslationBadge}`;
+
+    ui.sourceLanguageButton.textContent = sourceBadge;
+    ui.translationLanguageButton.textContent = translationBadge;
+    for (const button of [ui.sourceLanguageButton, ui.translationLanguageButton]) {
+        button.title = `${switchLabel} (입력 내용은 이동하지 않음)`;
+        button.setAttribute('aria-label', switchLabel);
+    }
+    ui.sourceLanguageButton.dataset.language = ui.sourceLanguage;
+    ui.translationLanguageButton.dataset.language = ui.translationLanguage;
+    ui.source.dataset.slbLanguage = sourceBadge;
+    ui.translation.dataset.slbLanguage = translationBadge;
+    ui.translation.placeholder = `${translationBadge} 번역문 · 이 칸은 로어북 매니저에만 저장됩니다.`;
+    setMenuButtonLabel(
+        ui.retranslateButton,
+        `${translationBadge}로 번역`,
+        `위 ${sourceBadge} 원문을 아래 ${translationBadge} 번역으로 변환`,
+    );
+    setMenuButtonLabel(
+        ui.applyButton,
+        `${sourceBadge} 원문으로 번역`,
+        `아래 ${translationBadge} 번역을 위 ${sourceBadge} 원문에 반영`,
+    );
+    if (ui.autoSyncText) {
+        ui.autoSyncText.textContent = ` 아래 ${translationBadge} 번역 수정 시 위 ${sourceBadge} 원문 자동 반영`;
+    }
+    ui.entry.dataset.slbSourceLanguage = sourceBadge;
+    ui.entry.dataset.slbTranslationLanguage = translationBadge;
+}
+
+function toggleEntryLanguageDirection(ui) {
+    if (ui.flags.translating) {
+        ui.status.textContent = '진행 중인 번역이 끝난 뒤 EN/KO 방향을 바꿔주세요.';
+        return;
+    }
+    const key = `${ui.book}:${ui.uid}`;
+    clearTimeout(state.sourceTimers.get(key));
+    clearTimeout(state.translationTimers.get(key));
+    state.sourceTimers.delete(key);
+    state.translationTimers.delete(key);
+
+    const pair = saveEntryLanguagePair(
+        ui.book,
+        ui.uid,
+        ui.translationLanguage,
+        ui.sourceLanguage,
+    );
+    ui.sourceLanguage = pair.sourceLanguage;
+    ui.translationLanguage = pair.translationLanguage;
+    ui.reflectionBaseline = { text: '', sourceHash: '' };
+    updateEntryLanguageUI(ui);
+    if (ui.translation.value) savePendingTranslation(ui, ui.translation.value);
+    ui.status.textContent = `방향 변경됨 · 원문 ${entryLanguageBadge(ui.sourceLanguage)} / 번역 ${entryLanguageBadge(ui.translationLanguage)} · 입력 내용은 그대로 유지했습니다.`;
 }
 
 function createTab(name, label) {
@@ -5002,6 +5202,7 @@ function enhanceEntry(entry) {
     const uid = getUid(entry);
     const book = currentBookName();
     const settings = getSettings();
+    const languagePair = getEntryLanguagePair(book, uid);
     const nativeLabel = sourcePane.querySelector(':scope > label');
     const nativeRow = nativeLabel?.querySelector('small > span');
     const maximize = nativeRow?.querySelector('.editor_maximize');
@@ -5012,16 +5213,28 @@ function enhanceEntry(entry) {
     const sourceActions = [];
     if (maximize) sourceActions.push(maximize);
     sourceActions.push(sourceAI);
-    const sourceHeader = buildEditorHeader('원문', 'EN', sourceActions);
+    const sourceHeader = buildEditorHeader(
+        '원문',
+        entryLanguageBadge(languagePair.sourceLanguage),
+        sourceActions,
+        'source',
+    );
+    const sourceLanguageButton = sourceHeader.querySelector('.slb-lang-badge');
 
     sourcePane.classList.add('slb-source-pane');
     sourcePane.insertBefore(sourceHeader, nativeLabel || source);
     nativeLabel?.classList.add('slb-native-content-label');
 
     const translationPane = createElement('div', 'slb-translation-pane');
-    const retranslate = createMenuButton('fa-solid fa-arrows-rotate', '다시 번역', '현재 원문 다시 번역');
+    const retranslate = createMenuButton('fa-solid fa-arrows-rotate', '번역', '현재 원문 번역');
     const translationAI = createMenuButton('fa-solid fa-wand-magic-sparkles', 'AI로 수정', 'AI로 번역 수정');
-    const translationHeader = buildEditorHeader('번역', settings.language === 'Korean' ? 'KO' : settings.language.slice(0, 2).toUpperCase(), [retranslate, translationAI]);
+    const translationHeader = buildEditorHeader(
+        '번역',
+        entryLanguageBadge(languagePair.translationLanguage),
+        [retranslate, translationAI],
+        'translation',
+    );
+    const translationLanguageButton = translationHeader.querySelector('.slb-lang-badge');
     const translation = createElement('textarea', 'text_pole slb-translation-text');
     translation.rows = 8;
     translation.placeholder = '번역문';
@@ -5035,7 +5248,8 @@ function enhanceEntry(entry) {
     const autoSync = document.createElement('input');
     autoSync.type = 'checkbox';
     autoSync.className = 'slb-entry-auto-sync';
-    syncLabel.append(autoSync, document.createTextNode(' 번역 수정 시 원문 자동 반영'));
+    const autoSyncText = createElement('span', '', ' 아래 번역 수정 시 위 원문 자동 반영');
+    syncLabel.append(autoSync, autoSyncText);
     const applyButton = createMenuButton('fa-solid fa-link', '지금 번역 반영', '번역 변경사항을 원문에 반영');
     applyButton.classList.add('slb-apply-translation');
     syncRow.append(syncStatus, syncLabel, applyButton);
@@ -5324,14 +5538,20 @@ function enhanceEntry(entry) {
         : 'content';
     showTab(savedTab);
 
-    const record = findTranslationRecord(book, uid, source.value);
-    if (record?.language === settings.language) {
+    const record = findTranslationRecord(book, uid, source.value, languagePair.translationLanguage);
+    if (record) {
         translation.value = record.text || '';
-        syncStatus.textContent = record.sourceHash === hashText(source.value) ? '저장된 번역을 불러왔습니다.' : '원문이 변경되어 번역 갱신이 필요합니다.';
+        syncStatus.textContent = !source.value.trim() && translation.value.trim()
+            ? `저장된 ${entryLanguageBadge(languagePair.translationLanguage)} 번역을 불러왔습니다. 위 원문이 비어 있어 역방향 번역이 가능합니다.`
+            : record.sourceHash === hashText(source.value)
+                ? '저장된 번역을 불러왔습니다.'
+                : '원문이 변경되어 번역 갱신이 필요합니다.';
     } else {
-        syncStatus.textContent = settings.translateMissingOnOpen
-            ? (canTranslate() ? '번역본 없음 · 항목을 열면 자동 번역합니다.' : '번역본 없음 · 확장 탭에서 번역 방식을 설정해주세요.')
-            : '번역본 없음 · 자동 번역이 꺼져 있습니다.';
+        syncStatus.textContent = !source.value.trim()
+            ? `위 ${entryLanguageBadge(languagePair.sourceLanguage)} 원문이 비어 있습니다. 아래 ${entryLanguageBadge(languagePair.translationLanguage)} 번역에 내용을 넣어 원문을 만들 수 있습니다.`
+            : settings.translateMissingOnOpen
+                ? (canTranslate() ? '번역본 없음 · 항목을 열면 자동 번역합니다.' : '번역본 없음 · 확장 탭에서 번역 방식을 설정해주세요.')
+                : '번역본 없음 · 자동 번역이 꺼져 있습니다.';
     }
 
     const ui = {
@@ -5344,8 +5564,18 @@ function enhanceEntry(entry) {
         translationPane,
         status: syncStatus,
         autoSync,
+        autoSyncText,
         applyButton,
-        reflectionBaseline: getTranslationReflectionBaseline(record, source.value),
+        retranslateButton: retranslate,
+        sourceLanguageButton,
+        translationLanguageButton,
+        sourceLanguage: languagePair.sourceLanguage,
+        translationLanguage: languagePair.translationLanguage,
+        reflectionBaseline: getTranslationReflectionBaseline(
+            record,
+            source.value,
+            languagePair.translationLanguage,
+        ),
         flags: {
             writingSource: false,
             writingTranslation: false,
@@ -5353,6 +5583,7 @@ function enhanceEntry(entry) {
             composingTranslation: false,
         },
     };
+    updateEntryLanguageUI(ui);
 
     async function runKeywordRecommendation(instruction = '') {
         const sourceSnapshot = ui.source.value;
@@ -5387,14 +5618,16 @@ function enhanceEntry(entry) {
     source.addEventListener('input', () => {
         if (ui.flags.writingSource) return;
         scheduleEntryTokenCount(ui.book, ui.uid, ui.source.value);
-        ui.status.textContent = '원문 변경 감지';
+        ui.status.textContent = `${entryLanguageBadge(ui.sourceLanguage)} 원문 변경 감지`;
         if (getSettings().autoTranslateSource) scheduleSourceTranslation(ui);
     });
     translation.addEventListener('input', () => {
         if (ui.flags.writingTranslation) return;
         if (ui.flags.composingTranslation) return;
         savePendingTranslation(ui, ui.translation.value);
-        ui.status.textContent = getSettings().autoSyncToSource ? '번역 변경 감지 · 원문 반영 대기 중' : '번역 변경 감지 · 수동 반영 필요';
+        ui.status.textContent = getSettings().autoSyncToSource
+            ? `${entryLanguageBadge(ui.translationLanguage)} 번역 변경 감지 · ${entryLanguageBadge(ui.sourceLanguage)} 원문 반영 대기 중`
+            : `${entryLanguageBadge(ui.translationLanguage)} 번역 변경 감지 · 수동 반영 가능`;
         if (getSettings().autoSyncToSource) scheduleTranslationReflection(ui);
     });
     translation.addEventListener('compositionstart', () => {
@@ -5404,7 +5637,9 @@ function enhanceEntry(entry) {
     translation.addEventListener('compositionend', () => {
         ui.flags.composingTranslation = false;
         savePendingTranslation(ui, ui.translation.value);
-        ui.status.textContent = getSettings().autoSyncToSource ? '번역 변경 감지 · 원문 반영 대기 중' : '번역 변경 감지 · 수동 반영 필요';
+        ui.status.textContent = getSettings().autoSyncToSource
+            ? `${entryLanguageBadge(ui.translationLanguage)} 번역 변경 감지 · ${entryLanguageBadge(ui.sourceLanguage)} 원문 반영 대기 중`
+            : `${entryLanguageBadge(ui.translationLanguage)} 번역 변경 감지 · 수동 반영 가능`;
         if (getSettings().autoSyncToSource) scheduleTranslationReflection(ui);
     });
     autoSync.addEventListener('change', () => {
@@ -5413,7 +5648,9 @@ function enhanceEntry(entry) {
         syncAutoControls();
     });
     retranslate.addEventListener('click', () => translateEntrySource(ui, true));
-    applyButton.addEventListener('click', () => reflectEntryTranslation(ui));
+    applyButton.addEventListener('click', () => reflectEntryTranslation(ui, { manual: true }));
+    sourceLanguageButton.addEventListener('click', () => toggleEntryLanguageDirection(ui));
+    translationLanguageButton.addEventListener('click', () => toggleEntryLanguageDirection(ui));
     sourceAI.addEventListener('click', () => runSourceRevision(ui));
     translationAI.addEventListener('click', () => runTranslationRevision(ui));
     recommendButton.addEventListener('click', () => runKeywordRecommendation());
@@ -5444,8 +5681,8 @@ function enhanceEntry(entry) {
     });
     updateEntrySyncMode(ui);
 
-    const hasTranslation = record?.language === settings.language && Boolean(record.text?.trim());
-    if (!hasTranslation && settings.translateMissingOnOpen && canTranslate()) {
+    const hasTranslation = Boolean(record?.text?.trim());
+    if (!hasTranslation && source.value.trim() && settings.translateMissingOnOpen && canTranslate()) {
         setTimeout(() => translateEntrySource(ui, true, true), 350);
     }
 }
