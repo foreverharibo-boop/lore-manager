@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.56';
+const VERSION = '1.4.57';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -1015,6 +1015,36 @@ function getResponseText(response) {
     return cleanAIText(response?.content ?? response?.text ?? response?.message ?? '');
 }
 
+function getAIRequestErrorMessage(error) {
+    const messages = [];
+    const visited = new Set();
+    let current = error;
+
+    for (let depth = 0; current && depth < 8; depth += 1) {
+        if ((typeof current === 'object' || typeof current === 'function')) {
+            if (visited.has(current)) break;
+            visited.add(current);
+        }
+
+        const message = typeof current === 'string' ? current : current?.message;
+        if (typeof message === 'string' && message.trim() && !messages.includes(message.trim())) {
+            messages.push(message.trim());
+        }
+        current = typeof current === 'object' || typeof current === 'function'
+            ? current?.cause
+            : null;
+    }
+
+    const genericMessages = new Set(['API request failed', 'Response not OK']);
+    const specific = [...messages].reverse().find(message => !genericMessages.has(message));
+    if (specific) return `API 요청 실패 · ${specific}`;
+
+    if (messages.includes('Response not OK')) {
+        return 'API 서버가 요청을 거부했습니다. 연결 프로필의 API 키·모델·사용량 제한을 확인해주세요.';
+    }
+    return messages[0] || 'API 요청에 실패했습니다.';
+}
+
 function findTranslationRecord(book, uid, source) {
     const settings = getSettings();
     const exactKey = translationKey(book, uid);
@@ -1083,19 +1113,25 @@ async function requestWithProfile(prompt, maxTokens = null) {
 
     const requestedMaxTokens = maxTokens ?? settings.aiOutputTokens;
 
-    const response = await ConnectionManagerRequestService.sendRequest(
-        settings.profileId,
-        prompt,
-        requestedMaxTokens,
-        {
-            stream: false,
-            signal: null,
-            extractData: true,
-            includePreset: false,
-            includeInstruct: false,
-            instructSettings: {},
-        },
-    );
+    let response;
+    try {
+        response = await ConnectionManagerRequestService.sendRequest(
+            settings.profileId,
+            prompt,
+            requestedMaxTokens,
+            {
+                stream: false,
+                signal: null,
+                extractData: true,
+                includePreset: false,
+                includeInstruct: false,
+                instructSettings: {},
+            },
+        );
+    } catch (error) {
+        console.error('[로어북 매니저] AI 전용 연결 프로필 요청 실패:', error);
+        throw new Error(getAIRequestErrorMessage(error), { cause: error });
+    }
 
     const text = getResponseText(response);
     if (!text) throw new Error('AI 응답이 비어 있습니다.');
@@ -3183,7 +3219,9 @@ function createAIBar() {
                 if (!sample.trim()) throw new Error('구글 번역 응답이 비어 있습니다.');
                 notify(`구글 번역 연결 성공 · 예시: ${sample.trim().slice(0, 40)}`, 'success');
             } else {
-                const answer = await requestWithProfile('Reply with exactly: OK', 16);
+                // 실제 번역과 같은 출력 토큰 설정을 사용한다. 최신 사고형 모델은
+                // 16토큰 테스트 요청 자체를 잘못된 요청으로 거부할 수 있다.
+                const answer = await requestWithProfile('Reply with exactly: OK');
                 if (!/^OK\b/i.test(answer)) throw new Error('프로필 응답 형식이 예상과 다릅니다.');
                 notify('전용 프로필 연결 성공 · 메인 연결 프로필은 변경되지 않았습니다.', 'success');
             }
