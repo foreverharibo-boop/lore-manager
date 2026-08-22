@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.58';
+const VERSION = '1.4.59';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -3590,6 +3590,22 @@ function bindWorkspaceEntries(entries) {
         });
         if (!relevantMutations.length) return;
 
+        // Memory Books adds regeneration actions asynchronously after reading
+        // the current lorebook. Reuse its real button instead of cloning or
+        // replacing it, even when it arrives after this editor was enhanced.
+        const memoryBooksEntries = new Set();
+        for (const mutation of relevantMutations) {
+            for (const node of mutation.addedNodes) {
+                if (!(node instanceof Element)) continue;
+                const button = node.matches('.stmb-regenerate-entry')
+                    ? node
+                    : node.querySelector('.stmb-regenerate-entry');
+                const ownerEntry = button?.closest('.world_entry');
+                if (ownerEntry) memoryBooksEntries.add(ownerEntry);
+            }
+        }
+        memoryBooksEntries.forEach(syncMemoryBooksRegenerationButton);
+
         const foldyStructureChanged = linkedMode && relevantMutations.some(mutation => (
             mutation.type === 'childList'
             && mutation.target instanceof Element
@@ -5087,6 +5103,21 @@ function buildEditorHeader(title, badge, actions = [], languageRole = '') {
     return header;
 }
 
+function syncMemoryBooksRegenerationButton(entry) {
+    if (!entry) return false;
+    const uidDisplay = entry.querySelector('.world_entry_form_uid_value');
+    const button = entry.querySelector('.stmb-regenerate-entry');
+    if (!uidDisplay || !button) return false;
+
+    // Memory Books owns this exact node, including its click listener,
+    // disabled state, tooltip and regeneration metadata. Keep it intact and
+    // only restore the position its extension expects: immediately after UID.
+    if (button.parentElement !== uidDisplay.parentElement || button.previousElementSibling !== uidDisplay) {
+        uidDisplay.insertAdjacentElement('afterend', button);
+    }
+    return true;
+}
+
 function updateEntryLanguageUI(ui) {
     const sourceBadge = entryLanguageBadge(ui.sourceLanguage);
     const translationBadge = entryLanguageBadge(ui.translationLanguage);
@@ -5171,6 +5202,7 @@ function enhanceEntry(entry) {
     if (edit.dataset.slbEnhanced) {
         if (hasCompleteEnhancedEditor(edit)) {
             edit.dataset.slbEnhanced = VERSION;
+            syncMemoryBooksRegenerationButton(entry);
             return;
         }
         // ST가 같은 editor 요소의 children만 네이티브 폼으로 교체하면 marker만
@@ -5254,8 +5286,13 @@ function enhanceEntry(entry) {
     applyButton.classList.add('slb-apply-translation');
     syncRow.append(syncStatus, syncLabel, applyButton);
 
+    // UID and token count used to be moved into the activation tab. Memory
+    // Books inserts its real regeneration button directly after that UID, so
+    // keep this native metadata row on the content screen where the action is
+    // immediately available. Recursion controls remain in the activation tab.
+    const contentMeta = createElement('div', 'slb-content-entry-meta');
+    if (tokenMeta) contentMeta.append(tokenMeta);
     const entryMeta = createElement('div', 'slb-entry-meta');
-    if (tokenMeta) entryMeta.append(tokenMeta);
     if (recursionMeta) entryMeta.append(recursionMeta);
 
     const activationContainer = contentBlock.parentElement;
@@ -5363,11 +5400,12 @@ function enhanceEntry(entry) {
     keywordAssistant.append(keywordHead, keywordHelp, keywordResults);
 
     panels.content.append(contentBlock, syncRow);
+    if (contentMeta.childElementCount) panels.content.append(contentMeta);
     panels.activation.append(activationOverview);
     panels.activation.append(keywordAssistant);
     if (activationContainer && activationContainer.isConnected) panels.activation.append(activationContainer);
     if (commentContainer && commentContainer.isConnected) panels.activation.append(commentContainer);
-    panels.activation.append(entryMeta);
+    if (entryMeta.childElementCount) panels.activation.append(entryMeta);
 
     if (groupRow) {
         groupRow.classList.add('slb-group-grid');
@@ -5519,6 +5557,7 @@ function enhanceEntry(entry) {
     }
 
     edit.replaceChildren(tabbar, panels.content, panels.activation, panels.group, panels.filter);
+    syncMemoryBooksRegenerationButton(entry);
     placeResponsiveHeaderFields(entry);
 
     function showTab(name) {

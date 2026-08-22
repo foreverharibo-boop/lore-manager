@@ -1076,6 +1076,46 @@
     border-top: 1px solid var(--slb-border);
 }
 
+#WorldInfo.slb-active .slb-content-entry-meta {
+    display: flex;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    margin-top: 7px;
+    padding-top: 7px;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--slb-border);
+    font-size: 0.85em;
+}
+
+#WorldInfo.slb-active .slb-content-entry-meta > span {
+    display: inline-flex !important;
+    max-width: 100%;
+    min-width: 0;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+#WorldInfo.slb-active .slb-content-entry-meta .stmb-regenerate-entry {
+    display: inline-flex !important;
+    box-sizing: border-box;
+    width: auto !important;
+    min-width: 0 !important;
+    min-height: 30px;
+    margin: 0 !important;
+    padding: 4px 8px !important;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
 #WorldInfo.slb-active .slb-entry-meta > * {
     max-width: 100%;
 }
@@ -2514,10 +2554,15 @@
     }
 
     #WorldInfo.slb-active .slb-entry-meta,
+    #WorldInfo.slb-active .slb-content-entry-meta,
     #WorldInfo.slb-active .slb-panel[data-panel="activation"] .checkbox,
     #WorldInfo.slb-active .slb-panel[data-panel="filter"] .checkbox {
         font-size: 0.8em;
         line-height: 1.2;
+    }
+
+    #WorldInfo.slb-active .slb-content-entry-meta {
+        justify-content: flex-start;
     }
 }
 
