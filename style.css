@@ -1936,8 +1936,20 @@
     align-items: center;
     gap: 4px;
     margin: 0;
-    white-space: nowrap;
+    white-space: nowrap !important;
     word-break: keep-all;
+}
+
+#slb-ai-tools .slb-quick-options .slb-bulk-action,
+#WorldInfo.slb-active .slb-quick-options .slb-bulk-action {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px 8px;
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    grid-column: 1 / -1;
 }
 
 #WorldInfo.slb-active .slb-summary-section {
@@ -2041,8 +2053,9 @@
     #slb-ai-tools .slb-quick-options label,
     #WorldInfo.slb-active .slb-quick-options label {
         min-width: 0;
-        white-space: normal;
+        white-space: nowrap !important;
         line-height: 1.22;
+        font-size: clamp(10px, 2.6vw, 13px) !important;
     }
 
     #slb-ai-tools .slb-quick-options label:nth-of-type(3),
@@ -3519,7 +3532,7 @@
 #slb-ai-tools #slb-quick-options-host > .slb-quick-options {
     display: grid !important;
     box-sizing: border-box !important;
-    grid-template-columns: minmax(0, 1.48fr) minmax(0, 1fr) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     column-gap: 6px !important;
     row-gap: 5px !important;
     width: 100% !important;
@@ -3549,6 +3562,10 @@
 #slb-ai-tools #slb-quick-options-host > .slb-quick-options > label > input[type="checkbox"] {
     flex: 0 0 auto !important;
     margin: 0 !important;
+}
+
+#WorldInfo.slb-active .slb-quick-options label > input[type="checkbox"] {
+    flex: 0 0 auto !important;
 }
 
 #slb-ai-tools #slb-quick-options-host > .slb-quick-options > label:nth-of-type(3) {
