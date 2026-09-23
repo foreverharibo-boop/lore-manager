@@ -1215,7 +1215,7 @@
         line-height: 1.25;
     }
 
-    #WorldInfo.slb-active .slb-quick-options label:last-child {
+    #WorldInfo.slb-active .slb-quick-options label:nth-of-type(3) {
         grid-column: 1 / -1;
     }
 
@@ -2045,8 +2045,8 @@
         line-height: 1.22;
     }
 
-    #slb-ai-tools .slb-quick-options label:last-child,
-    #WorldInfo.slb-active .slb-quick-options label:last-child {
+    #slb-ai-tools .slb-quick-options label:nth-of-type(3),
+    #WorldInfo.slb-active .slb-quick-options label:nth-of-type(3) {
         grid-column: 1 / -1;
     }
 
@@ -3551,8 +3551,34 @@
     margin: 0 !important;
 }
 
-#slb-ai-tools #slb-quick-options-host > .slb-quick-options > label:last-child {
+#slb-ai-tools #slb-quick-options-host > .slb-quick-options > label:nth-of-type(3) {
     grid-column: 1 / -1 !important;
+}
+
+#slb-ai-tools .slb-quick-options .slb-translate-book,
+#WorldInfo.slb-active .slb-quick-options .slb-translate-book {
+    flex: 0 0 auto;
+    width: max-content;
+    max-width: 100%;
+    margin: 2px 0;
+}
+
+#slb-ai-tools .slb-quick-options .slb-bulk-status,
+#WorldInfo.slb-active .slb-quick-options .slb-bulk-status {
+    flex: 1 1 100%;
+    min-width: 0;
+}
+
+#slb-ai-tools .slb-quick-options .slb-translate-book,
+#slb-ai-tools .slb-quick-options .slb-bulk-status {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 760px) {
+    #WorldInfo.slb-active .slb-quick-options .slb-translate-book,
+    #WorldInfo.slb-active .slb-quick-options .slb-bulk-status {
+        grid-column: 1 / -1;
+    }
 }
 
 /* v1.3.27 — mobile-only visibility preferences. */

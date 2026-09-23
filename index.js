@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.59';
+const VERSION = '1.4.60';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -121,6 +121,7 @@ const state = {
     navigatorSignature: '',
     sourceTimers: new Map(),
     translationTimers: new Map(),
+    bulkTranslation: null,
     entryStateSyncTimers: new WeakMap(),
     entryStateStabilizationRuns: new WeakMap(),
     entryFilterRefreshPending: false,
@@ -169,7 +170,7 @@ function ensureCriticalLayoutStyles() {
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot>.slb-filter-exclude{display:inline-flex!important;position:static!important;width:max-content!important;height:24px!important;margin:0!important;padding:0!important;align-items:center!important;gap:4px!important;background:transparent!important;font-size:.8em!important;white-space:nowrap!important;transform:none!important}
 #slb-ai-tools #slb-quick-options-host>.slb-quick-options{display:grid!important;grid-template-columns:minmax(0,1.48fr) minmax(0,1fr)!important;gap:5px 6px!important;width:100%!important;min-width:0!important;font-size:clamp(9px,2.35vw,.88em)!important}
 #slb-ai-tools #slb-quick-options-host>.slb-quick-options>label{display:inline-flex!important;min-width:0!important;align-items:center!important;gap:4px!important;white-space:nowrap!important;word-break:keep-all!important;overflow-wrap:normal!important}
-#slb-ai-tools #slb-quick-options-host>.slb-quick-options>label:last-child{grid-column:1/-1!important}
+#slb-ai-tools #slb-quick-options-host>.slb-quick-options>label:nth-of-type(3){grid-column:1/-1!important}
 #WorldInfo.slb-active .world_entry.slb-compact-entry .slb-panel[data-panel="activation"].is-active>.slb-activation-overview[data-slb-visible="true"]:not(:empty){display:grid!important;visibility:visible!important;opacity:1!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell{grid-template-columns:auto minmax(0,1fr) 18px auto!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge{display:inline-flex!important;box-sizing:border-box!important;grid-column:3!important;grid-row:1!important;width:18px!important;min-width:18px!important;max-width:18px!important;height:29px!important;margin:0!important;padding:0!important;align-items:center!important;justify-content:center!important;border:0!important;background:transparent!important;visibility:visible!important;opacity:1!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-header-actions{grid-column:4!important;grid-row:1!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge:before{content:"";display:block!important;width:12px!important;height:12px!important;border-radius:50%!important;background:linear-gradient(145deg,#73eba4,#2bbd6c)!important;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="constant"]:before{background:linear-gradient(145deg,#72b8ff,#2563eb)!important}#WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry.slb-compact-entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="vectorized"]:before{content:"🔗"!important;width:auto!important;height:auto!important;border-radius:0!important;background:none!important;box-shadow:none!important}
 #slb-strategy-picker{display:flex!important;position:absolute!important;top:calc(100% + 4px)!important;right:0!important;left:auto!important;gap:4px!important;padding:5px!important;border-radius:9px!important;background:var(--SmartThemeBlurTintColor,rgba(28,28,32,.96))!important;border:1px solid var(--SmartThemeBorderColor,rgba(255,255,255,.18))!important;box-shadow:0 5px 14px rgba(0,0,0,.32)!important;z-index:9999!important}#slb-strategy-picker .slb-strategy-picker-option{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:30px!important;height:30px!important;font-size:14px!important;border-radius:7px!important;border:1px solid transparent!important;background:transparent!important;cursor:pointer!important;margin:0!important;padding:0!important}#slb-strategy-picker .slb-strategy-picker-option.is-current{border-color:var(--SmartThemeQuoteColor,#8aa)!important;background:rgba(255,255,255,.1)!important}#WorldInfo.slb-active .slb-mobile-entry-state-badge{position:relative!important;overflow:visible!important;cursor:pointer}#WorldInfo.slb-active .slb-mobile-entry-state-badge.slb-picker-open{z-index:10000!important}
@@ -3306,9 +3307,11 @@ function createQuickTranslationOptions() {
         options = createElement('div', 'slb-quick-options');
         options.id = 'slb-quick-options';
         options.innerHTML = `
-            <label><input type="checkbox" id="slb-translate-missing"> 번역본 없는 항목을 열 때 자동 번역</label>
-            <label><input type="checkbox" id="slb-auto-translate"> 위 원문 변경 시 아래 자동 번역</label>
-            <label><input type="checkbox" id="slb-auto-sync"> 아래 번역 변경 시 위 원문 자동 반영</label>`;
+            <label><input type="checkbox" id="slb-translate-missing"> 개별 항목 자동번역</label>
+            <label><input type="checkbox" id="slb-auto-translate"> 원문 변경 자동번역</label>
+            <label><input type="checkbox" id="slb-auto-sync"> 번역 변경 자동번역</label>
+            <button type="button" class="menu_button slb-translate-book" id="slb-translate-book">현재 로어북 전체 번역</button>
+            <small class="slb-bulk-status" id="slb-bulk-status" role="status"></small>`;
     }
 
     if (options.dataset.slbBound === VERSION) return options;
@@ -3333,8 +3336,106 @@ function createQuickTranslationOptions() {
         saveSettingsDebounced();
         syncAutoControls();
     });
+    options.querySelector('#slb-translate-book').addEventListener('click', translateCurrentLorebook);
+    updateBulkTranslationStatus();
     options.dataset.slbBound = VERSION;
     return options;
+}
+
+function updateBulkTranslationStatus(message = '') {
+    const button = document.getElementById('slb-translate-book');
+    const status = document.getElementById('slb-bulk-status');
+    const job = state.bulkTranslation;
+    if (button) button.textContent = job ? '전체 번역 취소' : '현재 로어북 전체 번역';
+    if (status && message) status.textContent = message;
+}
+
+async function translateCurrentLorebook() {
+    if (state.bulkTranslation) {
+        state.bulkTranslation.cancelled = true;
+        updateBulkTranslationStatus('진행 중인 항목이 끝나면 중단합니다.');
+        return;
+    }
+    const book = currentBookName();
+    if (!book) {
+        notify('먼저 번역할 로어북을 선택해주세요.', 'warning');
+        return;
+    }
+    if (!canTranslate()) {
+        notify('확장 탭에서 번역 방식과 연결 프로필을 먼저 설정해주세요.', 'warning');
+        return;
+    }
+
+    const job = { book, cancelled: false };
+    state.bulkTranslation = job;
+    updateBulkTranslationStatus('로어북 항목을 불러오는 중…');
+    let succeeded = 0;
+    let failed = 0;
+    let skipped = 0;
+    try {
+        const data = await loadWorldInfo(book);
+        if (!data?.entries) throw new Error('로어북 항목을 불러오지 못했습니다.');
+        const entries = lorebookEntries(data).filter(entry => entry.content.trim());
+        for (let index = 0; index < entries.length && !job.cancelled; index += 1) {
+            const entry = entries[index];
+            const uid = String(entry.uid);
+            const open = renderedEntries().find(element => getUid(element) === uid);
+            const ui = open?.querySelector('.world_entry_edit')?.slbTranslationUI;
+            const source = ui?.source.value ?? entry.content;
+            const pair = ui
+                ? { sourceLanguage: ui.sourceLanguage, translationLanguage: ui.translationLanguage }
+                : getEntryLanguagePair(book, uid);
+            const previous = getSettings().translations[translationKey(book, uid)];
+            if (!source.trim() || ui?.flags.translating) {
+                skipped += 1;
+                continue;
+            }
+            updateBulkTranslationStatus(`${book} · ${index + 1}/${entries.length} 번역 중 (완료 ${succeeded}, 실패 ${failed})`);
+            try {
+                const translated = await translateText(source, pair.translationLanguage);
+                if (!translated?.trim()) throw new Error('번역 결과가 비어 있습니다.');
+                if (job.cancelled) break;
+                const latest = getSettings().translations[translationKey(book, uid)];
+                if (
+                    ui?.source.value !== undefined && ui.source.value !== source
+                    || ui?.translation.value !== undefined && ui.translation.value !== (previous?.text ?? '')
+                    || latest !== previous
+                    || ui && (ui.sourceLanguage !== pair.sourceLanguage || ui.translationLanguage !== pair.translationLanguage)
+                ) {
+                    skipped += 1;
+                    continue;
+                }
+                if (ui) {
+                    ui.flags.writingTranslation = true;
+                    ui.translation.value = translated;
+                    ui.flags.writingTranslation = false;
+                    markTranslationSynced(ui, source, translated);
+                    ui.status.textContent = '전체 번역으로 번역본을 갱신했습니다.';
+                } else {
+                    saveTranslationRecord(book, uid, source, translated, {
+                        markSynced: true,
+                        sourceLanguage: pair.sourceLanguage,
+                        translationLanguage: pair.translationLanguage,
+                    });
+                }
+                succeeded += 1;
+                if (succeeded % 5 === 0) await saveSettings();
+            } catch (error) {
+                failed += 1;
+                console.warn('[로어북 매니저] 전체 번역 항목 실패', uid, error);
+            }
+        }
+        await saveSettings();
+        const summary = `${book} 전체 번역 ${job.cancelled ? '중단' : '완료'} · 성공 ${succeeded}개, 실패 ${failed}개, 건너뜀 ${skipped}개`;
+        updateBulkTranslationStatus(summary);
+        notify(summary, failed ? 'warning' : 'success');
+    } catch (error) {
+        updateBulkTranslationStatus(error.message || '로어북 전체 번역에 실패했습니다.');
+        notify(error.message || '로어북 전체 번역에 실패했습니다.', 'error');
+    } finally {
+        if (state.bulkTranslation === job) state.bulkTranslation = null;
+        updateBulkTranslationStatus();
+    }
 }
 
 function syncQuickTranslationOptionsPlacement() {
@@ -4868,19 +4969,30 @@ function updateEntrySyncMode(ui) {
 function scheduleSourceTranslation(ui) {
     const key = `${ui.book}:${ui.uid}`;
     clearTimeout(state.sourceTimers.get(key));
-    state.sourceTimers.set(key, setTimeout(() => translateEntrySource(ui), 1200));
+    state.sourceTimers.set(key, setTimeout(() => {
+        state.sourceTimers.delete(key);
+        if (ui.root.isConnected) translateEntrySource(ui);
+    }, 1200));
 }
 
 function scheduleTranslationReflection(ui) {
     const key = `${ui.book}:${ui.uid}`;
     clearTimeout(state.translationTimers.get(key));
-    state.translationTimers.set(key, setTimeout(() => reflectEntryTranslation(ui, { manual: false }), 1400));
+    state.translationTimers.set(key, setTimeout(() => {
+        state.translationTimers.delete(key);
+        if (ui.root.isConnected) reflectEntryTranslation(ui, { manual: false });
+    }, 1400));
 }
 
 async function translateEntrySource(ui, force = false, background = false) {
-    if (ui.flags.writingSource || ui.flags.translating) return;
+    if (ui.flags.writingSource) return;
+    if (ui.flags.translating) {
+        if (!force && getSettings().autoTranslateSource) scheduleSourceTranslation(ui);
+        return;
+    }
     const settings = getSettings();
     const source = ui.source.value;
+    const translationBefore = ui.translation.value;
     const sourceLanguage = ui.sourceLanguage;
     const translationLanguage = ui.translationLanguage;
     const sourceBadge = entryLanguageBadge(sourceLanguage);
@@ -4911,6 +5023,7 @@ async function translateEntrySource(ui, force = false, background = false) {
         });
         if (
             ui.source.value !== source
+            || ui.translation.value !== translationBefore
             || ui.sourceLanguage !== sourceLanguage
             || ui.translationLanguage !== translationLanguage
         ) {
@@ -4929,11 +5042,21 @@ async function translateEntrySource(ui, force = false, background = false) {
         ui.flags.translating = false;
         ui.translationPane.classList.remove('slb-pane-busy');
         if (!background) setEntryBusy(ui, false);
+        if (ui.source.value !== source && settings.autoTranslateSource && ui.root.isConnected) {
+            scheduleSourceTranslation(ui);
+        }
+        if (ui.translation.value !== translationBefore && settings.autoSyncToSource && ui.root.isConnected) {
+            scheduleTranslationReflection(ui);
+        }
     }
 }
 
 async function reflectEntryTranslation(ui, { manual = false } = {}) {
-    if (ui.flags.writingTranslation || ui.flags.translating || ui.flags.composingTranslation) return;
+    if (ui.flags.writingTranslation || ui.flags.composingTranslation) return;
+    if (ui.flags.translating) {
+        if (!manual && getSettings().autoSyncToSource) scheduleTranslationReflection(ui);
+        return;
+    }
     const translation = ui.translation.value;
     const source = ui.source.value;
     const sourceLanguage = ui.sourceLanguage;
@@ -4951,11 +5074,6 @@ async function reflectEntryTranslation(ui, { manual = false } = {}) {
     const baseline = ui.reflectionBaseline;
     const baselineValid = Boolean(baseline?.text) && baseline.sourceHash === hashText(source);
     const needsFullTranslation = !source.trim() || !baselineValid;
-    if (needsFullTranslation && source.trim() && !manual) {
-        ui.status.textContent = `부분 반영 기준이 없습니다. “${sourceBadge} 원문으로 번역”을 눌러 위 원문 전체를 교체할 수 있습니다.`;
-        return;
-    }
-
     ui.flags.translating = true;
     setEntryBusy(ui, true, needsFullTranslation
         ? `${translationBadge} 번역 전체를 ${sourceBadge} 원문으로 번역하는 중…`
@@ -5029,6 +5147,9 @@ async function reflectEntryTranslation(ui, { manual = false } = {}) {
     } finally {
         ui.flags.translating = false;
         setEntryBusy(ui, false);
+        if (ui.translation.value !== translation && getSettings().autoSyncToSource && ui.root.isConnected) {
+            scheduleTranslationReflection(ui);
+        }
     }
 }
 
@@ -5622,6 +5743,7 @@ function enhanceEntry(entry) {
             composingTranslation: false,
         },
     };
+    edit.slbTranslationUI = ui;
     updateEntryLanguageUI(ui);
 
     async function runKeywordRecommendation(instruction = '') {
@@ -5656,6 +5778,8 @@ function enhanceEntry(entry) {
 
     source.addEventListener('input', () => {
         if (ui.flags.writingSource) return;
+        clearTimeout(state.translationTimers.get(`${ui.book}:${ui.uid}`));
+        state.translationTimers.delete(`${ui.book}:${ui.uid}`);
         scheduleEntryTokenCount(ui.book, ui.uid, ui.source.value);
         ui.status.textContent = `${entryLanguageBadge(ui.sourceLanguage)} 원문 변경 감지`;
         if (getSettings().autoTranslateSource) scheduleSourceTranslation(ui);
@@ -5663,6 +5787,8 @@ function enhanceEntry(entry) {
     translation.addEventListener('input', () => {
         if (ui.flags.writingTranslation) return;
         if (ui.flags.composingTranslation) return;
+        clearTimeout(state.sourceTimers.get(`${ui.book}:${ui.uid}`));
+        state.sourceTimers.delete(`${ui.book}:${ui.uid}`);
         savePendingTranslation(ui, ui.translation.value);
         ui.status.textContent = getSettings().autoSyncToSource
             ? `${entryLanguageBadge(ui.translationLanguage)} 번역 변경 감지 · ${entryLanguageBadge(ui.sourceLanguage)} 원문 반영 대기 중`
@@ -5721,8 +5847,17 @@ function enhanceEntry(entry) {
     updateEntrySyncMode(ui);
 
     const hasTranslation = Boolean(record?.text?.trim());
-    if (!hasTranslation && source.value.trim() && settings.translateMissingOnOpen && canTranslate()) {
-        setTimeout(() => translateEntrySource(ui, true, true), 350);
+    if (state.bulkTranslation?.book !== book && canTranslate()) {
+        if (!hasTranslation && source.value.trim() && settings.translateMissingOnOpen) {
+            setTimeout(() => {
+                if (ui.root.isConnected) translateEntrySource(ui, true, true);
+            }, 350);
+        } else if (record && record.sourceHash !== hashText(source.value) && settings.autoTranslateSource) {
+            scheduleSourceTranslation(ui);
+        } else if (record && record.sourceHash === hashText(source.value)
+            && record.text !== ui.reflectionBaseline.text && settings.autoSyncToSource) {
+            scheduleTranslationReflection(ui);
+        }
     }
 }
 
