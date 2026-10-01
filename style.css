@@ -4482,8 +4482,9 @@
     grid-template-areas:
         "title-left title-right"
         "control-left control-right"
+        "selection-left selection-right"
         "exclude exclude" !important;
-    grid-template-rows: 24px var(--slb-filter-slot-height) 28px !important;
+    grid-template-rows: 24px var(--slb-filter-slot-height) auto 28px !important;
 }
 
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] > .slb-filter-exclude-slot {
@@ -4515,6 +4516,39 @@
 
 @media (max-width: 760px) {
     #WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-filter-grid[data-slb-filter-layout="slots-v1"] {
-        grid-template-rows: 36px var(--slb-filter-slot-height) 28px !important;
+        grid-template-rows: 36px var(--slb-filter-slot-height) auto 28px !important;
     }
+}
+
+/* Keep selection visible after focus leaves or a selected row scrolls away. */
+#WorldInfo.slb-active .slb-filter-grid select.slb-native-filter-list option:checked {
+    background: #2563eb linear-gradient(#2563eb, #2563eb) !important;
+    color: #fff !important;
+    font-weight: 600 !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid > .slb-filter-selection-slot {
+    display: block !important;
+    min-width: 0;
+    margin: 0;
+    padding: 3px 5px;
+    font-size: 0.8em;
+    line-height: 1.4;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    opacity: 0.7;
+}
+
+#WorldInfo.slb-active .slb-filter-grid > .slb-filter-selection-slot-1 {
+    grid-area: selection-left !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid > .slb-filter-selection-slot-2 {
+    grid-area: selection-right !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid > .slb-filter-selection-slot.has-selection {
+    opacity: 1;
+    font-weight: 600;
+    border-left: 3px solid #2563eb;
 }

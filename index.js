@@ -12,7 +12,8 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.66';
+const VERSION = '1.4.67';
+const nativeConnectionFilterListeners = new WeakSet();
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -149,7 +150,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-4-66';
+    const styleId = 'slb-critical-layout-1-4-67';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -157,7 +158,7 @@ function ensureCriticalLayoutStyles() {
     style.id = styleId;
     style.dataset.slbCriticalLayout = VERSION;
     style.textContent = `
-#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{--slb-slot-h:160px;display:grid!important;box-sizing:border-box!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:24px var(--slb-slot-h) 28px!important;column-gap:24px!important;row-gap:5px!important;position:relative!important;width:100%!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{--slb-slot-h:160px;display:grid!important;box-sizing:border-box!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-template-areas:"title-left title-right" "control-left control-right" "selection-left selection-right" "exclude exclude"!important;grid-template-rows:24px var(--slb-slot-h) auto 28px!important;column-gap:24px!important;row-gap:5px!important;position:relative!important;width:100%!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot-1{grid-area:title-left!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot-2{grid-area:title-right!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot-1{grid-area:control-left!important}
@@ -205,7 +206,7 @@ function ensureCriticalLayoutStyles() {
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge:before{content:"";display:block!important;width:12px!important;height:12px!important;border-radius:50%!important;background:linear-gradient(145deg,#73eba4,#2bbd6c)!important;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="constant"]:before{background:linear-gradient(145deg,#72b8ff,#2563eb)!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="vectorized"]:before{content:"🔗"!important;width:auto!important;height:auto!important;border-radius:0!important;background:none!important;box-shadow:none!important}
-#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:36px var(--slb-slot-h) 28px!important;column-gap:12px!important;padding:0!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{grid-template-areas:"title-left title-right" "control-left control-right" "selection-left selection-right" "exclude exclude"!important;grid-template-rows:36px var(--slb-slot-h) auto 28px!important;column-gap:12px!important;padding:0!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot{height:36px!important;padding:0 2px!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] .slb-filter-title{font-size:clamp(10px,2.45vw,.76em)!important;line-height:1.12!important;white-space:normal!important;overflow-wrap:break-word!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot{grid-area:exclude!important;position:static!important;width:100%!important;height:28px!important;padding:0!important;background:transparent!important;transform:none!important}
@@ -5408,6 +5409,37 @@ function useNativeConnectionFilterLists(root) {
         if (select.classList.contains('select2-hidden-accessible')) return;
         select.classList.add('slb-native-filter-list');
         if (select.size < 2) select.size = 8;
+
+        const updateSelectionDisplay = () => {
+            const slot = select.closest('.slb-filter-control-slot');
+            const grid = slot?.closest('.slb-filter-grid');
+            if (!grid) return;
+            const side = slot.classList.contains('slb-filter-control-slot-2') ? 2 : 1;
+            let summary = grid.querySelector(`:scope > .slb-filter-selection-slot-${side}`);
+            if (!summary) {
+                summary = createElement('small', `slb-filter-selection-slot slb-filter-selection-slot-${side}`);
+                summary.setAttribute('aria-live', 'polite');
+                grid.append(summary);
+            }
+            // Read the original selected options; never change their labels or
+            // values, which SillyTavern uses to save character/tag filters.
+            const selected = Array.from(select.selectedOptions, option => option.text.trim());
+            summary.textContent = selected.length
+                ? `선택됨 (${selected.length}): ${selected.slice(0, 3).join(', ')}${selected.length > 3 ? ` 외 ${selected.length - 3}개` : ''}`
+                : '선택 없음 · 제한 없이 적용';
+            summary.title = selected.join(', ');
+            summary.classList.toggle('has-selection', selected.length > 0);
+        };
+        if (!nativeConnectionFilterListeners.has(select)) {
+            if (typeof jQuery === 'function') {
+                jQuery(select).on('input.slbNativeFilter change.slbNativeFilter', updateSelectionDisplay);
+            } else {
+                select.addEventListener('input', updateSelectionDisplay);
+                select.addEventListener('change', updateSelectionDisplay);
+            }
+            nativeConnectionFilterListeners.add(select);
+        }
+        updateSelectionDisplay();
     });
 }
 
