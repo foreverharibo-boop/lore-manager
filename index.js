@@ -12,7 +12,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.65';
+const VERSION = '1.4.66';
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -149,7 +149,7 @@ const state = {
 };
 
 function ensureCriticalLayoutStyles() {
-    const styleId = 'slb-critical-layout-1-4-9';
+    const styleId = 'slb-critical-layout-1-4-66';
     if (document.getElementById(styleId)) return;
     document.querySelectorAll('style[data-slb-critical-layout]').forEach(node => node.remove());
 
@@ -157,7 +157,7 @@ function ensureCriticalLayoutStyles() {
     style.id = styleId;
     style.dataset.slbCriticalLayout = VERSION;
     style.textContent = `
-#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{--slb-slot-h:160px;display:grid!important;box-sizing:border-box!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-template-areas:"title-left title-right" "control-left control-right"!important;grid-template-rows:24px var(--slb-slot-h)!important;column-gap:24px!important;row-gap:5px!important;position:relative!important;width:100%!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{--slb-slot-h:160px;display:grid!important;box-sizing:border-box!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:24px var(--slb-slot-h) 28px!important;column-gap:24px!important;row-gap:5px!important;position:relative!important;width:100%!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot-1{grid-area:title-left!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot-2{grid-area:title-right!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot-1{grid-area:control-left!important}
@@ -166,7 +166,7 @@ function ensureCriticalLayoutStyles() {
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] .slb-filter-title{display:block!important;position:static!important;width:100%!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;font-size:.8em!important;line-height:1.05!important;text-align:center!important;white-space:nowrap!important;overflow:visible!important;text-overflow:clip!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot{display:block!important;box-sizing:border-box!important;width:100%!important;min-width:0!important;height:var(--slb-slot-h)!important;margin:0!important;padding:0!important;overflow:hidden!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot>.slb-filter-control,#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot select,#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot .select2-container,#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot .select2-selection--multiple{display:block!important;box-sizing:border-box!important;width:100%!important;min-width:0!important;max-width:100%!important;height:100%!important;min-height:100%!important;max-height:100%!important;margin:0!important}
-#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot{display:flex!important;position:absolute!important;z-index:6!important;top:0!important;left:50%!important;width:max-content!important;height:24px!important;padding:0 5px!important;align-items:center!important;justify-content:center!important;background:var(--SmartThemeBlurTintColor,var(--slb-surface))!important;transform:translateX(-50%)!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot{display:flex!important;grid-area:exclude!important;position:static!important;z-index:auto!important;top:auto!important;left:auto!important;width:100%!important;height:28px!important;padding:0!important;align-items:center!important;justify-content:center!important;background:transparent!important;transform:none!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot>.slb-filter-exclude{display:inline-flex!important;position:static!important;width:max-content!important;height:24px!important;margin:0!important;padding:0!important;align-items:center!important;gap:4px!important;background:transparent!important;font-size:.8em!important;white-space:nowrap!important;transform:none!important}
 #slb-ai-tools #slb-quick-options-host>.slb-quick-options{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:5px 6px!important;width:100%!important;min-width:0!important;font-size:clamp(10px,2.45vw,.82em)!important}
 #slb-ai-tools #slb-quick-options-host>.slb-quick-options>label{display:inline-flex!important;min-width:0!important;align-items:center!important;gap:4px!important;white-space:nowrap!important;word-break:keep-all!important;overflow-wrap:normal!important}
@@ -5395,6 +5395,22 @@ function hasCompleteEnhancedEditor(edit) {
     return hasTabbar && ['content', 'activation', 'group', 'filter'].every(name => panelNames.has(name));
 }
 
+function useNativeConnectionFilterLists(root) {
+    // Keep the original selects, options and change handlers. Select2's hidden
+    // select and replacement widget cannot share the same fixed-height slot.
+    root.querySelectorAll('.slb-filter-control-slot select[multiple]').forEach(select => {
+        if (typeof jQuery === 'function' && typeof jQuery.fn?.select2 === 'function') {
+            const field = jQuery(select);
+            if (field.data('select2')) {
+                field.select2('destroy');
+            }
+        }
+        if (select.classList.contains('select2-hidden-accessible')) return;
+        select.classList.add('slb-native-filter-list');
+        if (select.size < 2) select.size = 8;
+    });
+}
+
 function enhanceEntry(entry) {
     if (!entry) return;
     const edit = queryCompatible(entry, ['.world_entry_edit', '.world-entry-edit', '[data-role="entry-editor"]']);
@@ -5402,6 +5418,7 @@ function enhanceEntry(entry) {
     if (edit.dataset.slbEnhanced) {
         if (hasCompleteEnhancedEditor(edit)) {
             edit.dataset.slbEnhanced = VERSION;
+            useNativeConnectionFilterLists(edit);
             syncMemoryBooksRegenerationButton(entry);
             return;
         }
@@ -5738,6 +5755,7 @@ function enhanceEntry(entry) {
             }
         }
         panels.filter.append(filterRow);
+        useNativeConnectionFilterLists(panels.filter);
     }
     if (matchingSources) {
         matchingSources.classList.add('slb-matching-sources');
@@ -5755,6 +5773,7 @@ function enhanceEntry(entry) {
     placeResponsiveHeaderFields(entry);
 
     function showTab(name) {
+        if (name === 'filter') useNativeConnectionFilterLists(panels.filter);
         entry.dataset.slbActiveTab = name;
         tabs.forEach(tab => tab.classList.toggle('is-active', tab.dataset.tab === name));
         Object.entries(panels).forEach(([panelName, panel]) => panel.classList.toggle('is-active', panelName === name));

@@ -508,7 +508,30 @@
 }
 
 .slb-export-modal-footer {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
     justify-content: flex-end;
+    width: 100%;
+}
+
+.slb-export-modal-footer > .menu_button {
+    display: inline-flex !important;
+    box-sizing: border-box !important;
+    flex: 0 0 auto;
+    width: auto !important;
+    min-width: max-content !important;
+    max-width: none !important;
+    height: auto !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 6px 9px !important;
+    line-height: 1.2 !important;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
 }
 
 @media (max-width: 760px) {
@@ -524,7 +547,7 @@
 
     .slb-export-modal-footer .menu_button {
         flex: 1 1 0;
-        min-width: 0;
+        min-width: max-content !important;
     }
 }
 
@@ -4452,4 +4475,46 @@
     color: var(--SmartThemeBodyColor, inherit);
     font-size: 0.9em;
     opacity: 0.7;
+}
+
+/* Connection filters use the same native scrolling lists on PC and mobile. */
+#WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-filter-grid[data-slb-filter-layout="slots-v1"] {
+    grid-template-areas:
+        "title-left title-right"
+        "control-left control-right"
+        "exclude exclude" !important;
+    grid-template-rows: 24px var(--slb-filter-slot-height) 28px !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] > .slb-filter-exclude-slot {
+    grid-area: exclude !important;
+    position: static !important;
+    top: auto !important;
+    left: auto !important;
+    z-index: auto !important;
+    width: 100% !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    max-height: 28px !important;
+    padding: 0 !important;
+    background: transparent !important;
+    transform: none !important;
+}
+
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] select.slb-native-filter-list {
+    position: static !important;
+    clip: auto !important;
+    clip-path: none !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    overflow: auto !important;
+    padding: 3px 5px !important;
+    font: inherit;
+    line-height: 1.35 !important;
+}
+
+@media (max-width: 760px) {
+    #WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-filter-grid[data-slb-filter-layout="slots-v1"] {
+        grid-template-rows: 36px var(--slb-filter-slot-height) 28px !important;
+    }
 }
