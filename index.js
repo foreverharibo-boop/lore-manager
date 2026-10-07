@@ -13,8 +13,8 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.68';
-const nativeConnectionFilterListeners = new WeakSet();
+const VERSION = '1.4.69';
+const nativeConnectionFilterLists = new WeakMap();
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
 const ENTRY_STATE_FILTER = 'simple_lorebook_entry_state';
@@ -159,7 +159,7 @@ function ensureCriticalLayoutStyles() {
     style.id = styleId;
     style.dataset.slbCriticalLayout = VERSION;
     style.textContent = `
-#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{--slb-slot-h:160px;display:grid!important;box-sizing:border-box!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-template-areas:"title-left title-right" "control-left control-right" "selection-left selection-right" "exclude exclude"!important;grid-template-rows:24px var(--slb-slot-h) auto 28px!important;column-gap:24px!important;row-gap:5px!important;position:relative!important;width:100%!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{--slb-slot-h:160px;display:grid!important;box-sizing:border-box!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:24px var(--slb-slot-h) 28px!important;column-gap:24px!important;row-gap:5px!important;position:relative!important;width:100%!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot-1{grid-area:title-left!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot-2{grid-area:title-right!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot-1{grid-area:control-left!important}
@@ -207,7 +207,7 @@ function ensureCriticalLayoutStyles() {
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge:before{content:"";display:block!important;width:12px!important;height:12px!important;border-radius:50%!important;background:linear-gradient(145deg,#73eba4,#2bbd6c)!important;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="constant"]:before{background:linear-gradient(145deg,#72b8ff,#2563eb)!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="vectorized"]:before{content:"🔗"!important;width:auto!important;height:auto!important;border-radius:0!important;background:none!important;box-shadow:none!important}
-#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{grid-template-areas:"title-left title-right" "control-left control-right" "selection-left selection-right" "exclude exclude"!important;grid-template-rows:36px var(--slb-slot-h) auto 28px!important;column-gap:12px!important;padding:0!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:36px var(--slb-slot-h) 28px!important;column-gap:12px!important;padding:0!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot{height:36px!important;padding:0 2px!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] .slb-filter-title{font-size:clamp(10px,2.45vw,.76em)!important;line-height:1.12!important;white-space:normal!important;overflow-wrap:break-word!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot{grid-area:exclude!important;position:static!important;width:100%!important;height:28px!important;padding:0!important;background:transparent!important;transform:none!important}
@@ -603,6 +603,7 @@ function initGlobalLorebookSelection() {
             input.checked = active.has(book.name);
             const title = document.createElement('span');
             title.textContent = book.name;
+            label.title = book.name;
             label.append(input, title);
             list.append(label);
         }
@@ -5485,49 +5486,67 @@ function hasCompleteEnhancedEditor(edit) {
 }
 
 function useNativeConnectionFilterLists(root) {
-    // Keep the original selects, options and change handlers. Select2's hidden
-    // select and replacement widget cannot share the same fixed-height slot.
+    root.querySelectorAll('.slb-filter-selection-slot').forEach(summary => summary.remove());
     root.querySelectorAll('.slb-filter-control-slot select[multiple]').forEach(select => {
-        if (typeof jQuery === 'function' && typeof jQuery.fn?.select2 === 'function') {
+        const existing = nativeConnectionFilterLists.get(select);
+        if (existing) {
+            existing.sync();
+            return;
+        }
+        // Preserve native controls/handlers for saving, but render theme-colored
+        // rows ourselves so Android's system selection color cannot override them.
+        if (typeof jQuery.fn?.select2 === 'function') {
             const field = jQuery(select);
-            if (field.data('select2')) {
-                field.select2('destroy');
-            }
+            if (field.data('select2')) field.select2('destroy');
         }
         if (select.classList.contains('select2-hidden-accessible')) return;
-        select.classList.add('slb-native-filter-list');
-        if (select.size < 2) select.size = 8;
-
-        const updateSelectionDisplay = () => {
-            const slot = select.closest('.slb-filter-control-slot');
-            const grid = slot?.closest('.slb-filter-grid');
-            if (!grid) return;
-            const side = slot.classList.contains('slb-filter-control-slot-2') ? 2 : 1;
-            let summary = grid.querySelector(`:scope > .slb-filter-selection-slot-${side}`);
-            if (!summary) {
-                summary = createElement('small', `slb-filter-selection-slot slb-filter-selection-slot-${side}`);
-                summary.setAttribute('aria-live', 'polite');
-                grid.append(summary);
+        const list = document.createElement('div');
+        list.className = 'slb-themed-filter-list';
+        list.setAttribute('role', 'group');
+        list.setAttribute('aria-label', select.name === 'characterFilter' ? '캐릭터 및 태그 연결 필터' : '생성 유형 연결 필터');
+        select.classList.add('slb-themed-filter-source');
+        select.insertAdjacentElement('afterend', list);
+        let signature = '';
+        const sync = () => {
+            const options = Array.from(select.options);
+            const next = JSON.stringify(options.map(option => [option.value, option.text, option.disabled]));
+            if (next !== signature) {
+                signature = next;
+                const scrollTop = list.scrollTop;
+                list.replaceChildren();
+                options.forEach((option, index) => {
+                    if (option.disabled || option.value === '') return;
+                    const label = document.createElement('label');
+                    label.className = 'slb-themed-filter-row';
+                    label.title = option.text;
+                    const input = document.createElement('input');
+                    input.type = 'checkbox';
+                    input.dataset.optionIndex = String(index);
+                    const title = document.createElement('span');
+                    title.textContent = option.text;
+                    label.append(input, title);
+                    list.append(label);
+                });
+                list.scrollTop = scrollTop;
             }
-            // Read the original selected options; never change their labels or
-            // values, which SillyTavern uses to save character/tag filters.
-            const selected = Array.from(select.selectedOptions, option => option.text.trim());
-            summary.textContent = selected.length
-                ? `선택됨 (${selected.length}): ${selected.slice(0, 3).join(', ')}${selected.length > 3 ? ` 외 ${selected.length - 3}개` : ''}`
-                : '선택 없음 · 제한 없이 적용';
-            summary.title = selected.join(', ');
-            summary.classList.toggle('has-selection', selected.length > 0);
+            list.querySelectorAll('input').forEach(input => {
+                input.checked = Boolean(options[Number(input.dataset.optionIndex)]?.selected);
+            });
         };
-        if (!nativeConnectionFilterListeners.has(select)) {
-            if (typeof jQuery === 'function') {
-                jQuery(select).on('input.slbNativeFilter change.slbNativeFilter', updateSelectionDisplay);
-            } else {
-                select.addEventListener('input', updateSelectionDisplay);
-                select.addEventListener('change', updateSelectionDisplay);
-            }
-            nativeConnectionFilterListeners.add(select);
-        }
-        updateSelectionDisplay();
+        list.addEventListener('change', event => {
+            const input = event.target;
+            if (!(input instanceof HTMLInputElement)) return;
+            const option = select.options[Number(input.dataset.optionIndex)];
+            if (!option || option.disabled) return;
+            option.selected = input.checked;
+            // Character/tag filters save on change; generation filters on input.
+            jQuery(select).trigger('input').trigger('change');
+            sync();
+        });
+        jQuery(select).on('input.slbNativeFilter change.slbNativeFilter', sync);
+        new MutationObserver(sync).observe(select, { childList: true, subtree: true, attributes: true, characterData: true });
+        nativeConnectionFilterLists.set(select, { list, sync });
+        sync();
     });
 }
 
