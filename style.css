@@ -3341,7 +3341,7 @@
    native header의 flex/grid 구현과 완전히 분리해 기기별 잘림을 막는다.
    ============================================================ */
 #WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-filter-grid[data-slb-filter-layout="slots-v1"] {
-    --slb-filter-slot-height: 160px;
+    --slb-filter-slot-height: 96px;
     display: grid !important;
     box-sizing: border-box !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
@@ -3501,16 +3501,16 @@
             "title-left title-right"
             "control-left control-right"
             "exclude exclude" !important;
-        grid-template-rows: 36px var(--slb-filter-slot-height) 28px !important;
+        grid-template-rows: 24px var(--slb-filter-slot-height) 28px !important;
         column-gap: 12px !important;
         row-gap: 5px !important;
         padding: 0 !important;
     }
 
     #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] > .slb-filter-title-slot {
-        height: 36px !important;
-        min-height: 36px !important;
-        max-height: 36px !important;
+        height: 24px !important;
+        min-height: 24px !important;
+        max-height: 24px !important;
         padding: 0 2px !important;
     }
 
@@ -4515,7 +4515,7 @@
 
 @media (max-width: 760px) {
     #WorldInfo.slb-active .slb-panel[data-panel="filter"] > .slb-filter-grid[data-slb-filter-layout="slots-v1"] {
-        grid-template-rows: 36px var(--slb-filter-slot-height) 28px !important;
+        grid-template-rows: 24px var(--slb-filter-slot-height) 28px !important;
     }
 }
 
@@ -4537,7 +4537,10 @@
     width: 100%;
     overflow-y: auto;
     box-sizing: border-box;
-    padding: 3px 5px !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+    padding: 2px 4px !important;
     border: 1px solid var(--SmartThemeBorderColor, #8888);
     border-radius: 8px;
     background: var(--SmartThemeBlurTintColor, transparent);
@@ -4547,7 +4550,8 @@
 }
 
 #WorldInfo.slb-active #slb-global-lorebooks {
-    max-height: 110px;
+    height: auto !important;
+    max-height: 52px !important;
 }
 
 #WorldInfo.slb-active .slb-filter-control-slot > .slb-themed-filter-list,
@@ -4563,9 +4567,13 @@
     display: flex !important;
     align-items: center;
     flex: 0 0 auto;
-    min-height: 26px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    height: auto !important;
+    min-height: 0 !important;
     margin: 0 !important;
-    padding: 2px 5px !important;
+    padding: 0 4px !important;
     border: 0 !important;
     border-radius: 3px;
     cursor: pointer;
@@ -4573,7 +4581,7 @@
     background: transparent;
     color: inherit;
     font: inherit;
-    line-height: 1.25;
+    line-height: 1.2 !important;
     text-align: left;
 }
 

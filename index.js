@@ -13,7 +13,7 @@ import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.69';
+const VERSION = '1.4.70';
 const nativeConnectionFilterLists = new WeakMap();
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
@@ -159,7 +159,7 @@ function ensureCriticalLayoutStyles() {
     style.id = styleId;
     style.dataset.slbCriticalLayout = VERSION;
     style.textContent = `
-#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{--slb-slot-h:160px;display:grid!important;box-sizing:border-box!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:24px var(--slb-slot-h) 28px!important;column-gap:24px!important;row-gap:5px!important;position:relative!important;width:100%!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{--slb-slot-h:96px;display:grid!important;box-sizing:border-box!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:24px var(--slb-slot-h) 28px!important;column-gap:24px!important;row-gap:5px!important;position:relative!important;width:100%!important;min-width:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot-1{grid-area:title-left!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot-2{grid-area:title-right!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-control-slot-1{grid-area:control-left!important}
@@ -207,8 +207,8 @@ function ensureCriticalLayoutStyles() {
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge:before{content:"";display:block!important;width:12px!important;height:12px!important;border-radius:50%!important;background:linear-gradient(145deg,#73eba4,#2bbd6c)!important;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="constant"]:before{background:linear-gradient(145deg,#72b8ff,#2563eb)!important}
 #WorldInfo.slb-active.slb-mobile-entry-state-enabled .world_entry .slb-entry-header-shell>.slb-mobile-entry-state-badge[data-state="vectorized"]:before{content:"🔗"!important;width:auto!important;height:auto!important;border-radius:0!important;background:none!important;box-shadow:none!important}
-#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:36px var(--slb-slot-h) 28px!important;column-gap:12px!important;padding:0!important}
-#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot{height:36px!important;padding:0 2px!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]{grid-template-areas:"title-left title-right" "control-left control-right" "exclude exclude"!important;grid-template-rows:24px var(--slb-slot-h) 28px!important;column-gap:12px!important;padding:0!important}
+#WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-title-slot{height:24px!important;padding:0 2px!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"] .slb-filter-title{font-size:clamp(10px,2.45vw,.76em)!important;line-height:1.12!important;white-space:normal!important;overflow-wrap:break-word!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot{grid-area:exclude!important;position:static!important;width:100%!important;height:28px!important;padding:0!important;background:transparent!important;transform:none!important}
 #WorldInfo.slb-active .slb-filter-grid[data-slb-filter-layout="slots-v1"]>.slb-filter-exclude-slot>.slb-filter-exclude{height:28px!important;margin-inline:auto!important;font-size:.76em!important}
