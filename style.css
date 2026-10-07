@@ -4552,3 +4552,51 @@
     font-weight: 600;
     border-left: 3px solid #2563eb;
 }
+
+/* Mobile global activation uses committed checkboxes, not native focus highlights. */
+#WorldInfo.slb-active #world_info.slb-global-world-select {
+    display: none !important;
+}
+
+#WorldInfo.slb-active #slb-global-lorebooks {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    max-height: 150px;
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 5px 8px;
+    border: 1px solid var(--SmartThemeBorderColor, #8888);
+    border-radius: 10px;
+    background: var(--SmartThemeBlurTintColor, transparent);
+}
+
+#WorldInfo.slb-active .slb-global-lorebook {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    margin: 0;
+    padding: 2px 0;
+    cursor: pointer;
+    text-align: left;
+}
+
+#WorldInfo.slb-active .slb-global-lorebook input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--SmartThemeQuoteColor, #2563eb);
+}
+
+#WorldInfo.slb-active .slb-global-lorebook span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+#WorldInfo.slb-active .slb-global-lorebooks-empty {
+    opacity: .7;
+    padding: 5px 0;
+}

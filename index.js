@@ -7,12 +7,13 @@ import {
 } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
-import { loadWorldInfo, splitKeywordsAndRegexes, saveWorldInfo, setWIOriginalDataValue, updateWorldInfoList, worldInfoFilter, world_names } from '../../../world-info.js';
+import { loadWorldInfo, splitKeywordsAndRegexes, saveWorldInfo, setWIOriginalDataValue, updateWorldInfoList, worldInfoFilter, world_names, selected_world_info, world_info } from '../../../world-info.js';
+import { isMobile } from '../../../RossAscends-mods.js';
 import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.67';
+const VERSION = '1.4.68';
 const nativeConnectionFilterListeners = new WeakSet();
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
@@ -553,6 +554,93 @@ function notify(message, type = 'info') {
     if (type === 'error') toastr.error(message, '로어북 매니저');
     if (type === 'success') toastr.success(message, '로어북 매니저', { timeOut: 2200 });
     if (type === 'warning') toastr.warning(message, '로어북 매니저', { timeOut: 5000 });
+}
+
+function initGlobalLorebookSelection() {
+    const select = document.getElementById('world_info');
+    if (!isMobile() || !select || document.getElementById('slb-global-lorebooks')) return;
+
+    // Android's native multiple select can highlight an option without committing
+    // a change. Use explicit checkboxes, keeping ST's select and save handler as
+    // the source of truth instead of storing a second activation list.
+    const list = document.createElement('div');
+    list.id = 'slb-global-lorebooks';
+    list.setAttribute('role', 'group');
+    list.setAttribute('aria-label', '모든 채팅에서 활성화할 로어북');
+    select.classList.add('slb-global-world-select');
+    select.insertAdjacentElement('afterend', list);
+    let signature = '';
+
+    const sync = () => {
+        const active = new Set(selected_world_info);
+        const books = Array.from(select.options)
+            .filter(option => option.value !== '' && !option.disabled)
+            .map(option => ({ value: option.value, name: world_names[Number(option.value)] }))
+            .filter(book => typeof book.name === 'string' && book.name.length > 0);
+        const nextSignature = JSON.stringify(books.map(book => [book.value, book.name, active.has(book.name)]));
+        if (nextSignature === signature) return;
+        signature = nextSignature;
+
+        // Update checks in place so another selection does not lose focus/scroll.
+        const rows = Array.from(list.querySelectorAll('input[data-world-name]'));
+        if (rows.length === books.length && rows.every((input, index) => (
+            input.dataset.worldName === books[index].name
+            && input.value === books[index].value
+        ))) {
+            rows.forEach(input => { input.checked = active.has(input.dataset.worldName); });
+            return;
+        }
+
+        const scrollTop = list.scrollTop;
+        list.replaceChildren();
+        for (const book of books) {
+            const label = document.createElement('label');
+            label.className = 'slb-global-lorebook';
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.value = book.value;
+            input.dataset.worldName = book.name;
+            input.checked = active.has(book.name);
+            const title = document.createElement('span');
+            title.textContent = book.name;
+            label.append(input, title);
+            list.append(label);
+        }
+        if (!books.length) {
+            const empty = document.createElement('span');
+            empty.className = 'slb-global-lorebooks-empty';
+            empty.textContent = '등록된 로어북이 없어요.';
+            list.append(empty);
+        }
+        list.scrollTop = scrollTop;
+    };
+
+    list.addEventListener('change', event => {
+        const input = event.target;
+        if (!(input instanceof HTMLInputElement) || !input.dataset.worldName) return;
+        const active = new Set(selected_world_info);
+        if (input.checked) active.add(input.dataset.worldName);
+        else active.delete(input.dataset.worldName);
+        for (const option of select.options) {
+            option.selected = option.value !== '' && active.has(world_names[Number(option.value)]);
+        }
+        // Trigger the real ST handler: it updates selected_world_info, emits the
+        // settings event and uses the normal server-backed settings persistence.
+        jQuery(select).trigger('change');
+        sync();
+        // Flush immediately instead of depending on a delayed save after closing.
+        // ST copies this live selection into globalSelect inside its debounce;
+        // copy it now as well, otherwise the immediate save writes the old list.
+        world_info.globalSelect = [...selected_world_info];
+        void Promise.resolve(saveSettings()).catch(error => {
+            console.error('[로어북 매니저] 글로벌 활성화 설정 저장 실패', error);
+            toastr.error('로어북 활성화 설정을 저장하지 못했어요. 서버 연결을 확인해 주세요.');
+        });
+    });
+    jQuery(select).on('change.slbGlobalLorebooks', sync);
+    new MutationObserver(sync).observe(select, { childList: true, subtree: true, attributes: true });
+    if (event_types.WORLDINFO_SETTINGS_UPDATED) eventSource.on(event_types.WORLDINFO_SETTINGS_UPDATED, sync);
+    sync();
 }
 
 function currentBookName() {
@@ -6804,6 +6892,7 @@ function enhanceAll() {
         return;
     }
     ensureCriticalLayoutStyles();
+    initGlobalLorebookSelection();
     createAIBar();
     createBulkLorebookExportControls();
     createWorkspace();
