@@ -206,3 +206,44 @@ test('blank numbers, disabled controls, single selection, and load failure never
         assert.equal(f.errors.length, 1);
     } finally { f.close(); }
 });
+
+test('a selected row with a missing settings UI still receives the data patch', async () => {
+    const f = setup(true);
+    try {
+        f.mode(); f.choose(0); f.choose(1);
+        f.control(1, 'entryStateSelector').closest('.slb-strategy-field').remove();
+        const untouched = JSON.stringify(f.books.A.entries[2]);
+        await f.edit(0, 'entryStateSelector', 'constant');
+        assert.equal(f.books.A.entries[1].constant, true);
+        assert.equal(f.books.A.entries[1].vectorized, false);
+        assert.equal(JSON.stringify(f.books.A.entries[2]), untouched);
+        assert.deepEqual(f.errors, []);
+    } finally { f.close(); }
+});
+
+test('mobile picker reapplies the same strategy to other selected entries', async () => {
+    const f = setup(true);
+    try {
+        const index = readFileSync(require('node:path').join(__dirname, '../index.js'), 'utf8');
+        const apply = index.match(/^function applyEntryStrategy\([^]*?^}/m)[0];
+        const query = index.match(/^function queryCompatible\([^]*?^}/m)[0];
+        f.w.fixtureEditor = f.editor;
+        f.w.eval(`const entryBulkEditor = window.fixtureEditor;
+            const syncMobileEntryStateBadge = () => {};
+            const scheduleEntryInjectionStateSync = () => {};
+            ${query}\n${apply}\nwindow.applyStrategy = applyEntryStrategy;`);
+        f.mode(); f.choose(0); f.choose(1);
+        assert.equal(f.books.A.entries[0].constant, true);
+        assert.equal(f.control(1, 'entryStateSelector').value, 'normal');
+        f.w.applyStrategy(f.rows()[1], 'normal');
+        await flush();
+        assert.equal(f.books.A.entries[0].constant, false);
+        assert.equal(f.books.A.entries[2].constant, false);
+        assert.equal(f.saves.filter(x => x.startsWith('bulk')).length, 1);
+        f.mode();
+        const saveCount = f.saves.length;
+        f.w.applyStrategy(f.rows()[1], 'normal');
+        await flush();
+        assert.equal(f.saves.length, saveCount, 'ordinary single entry unchanged value stays a no-op');
+    } finally { f.close(); }
+});

@@ -14,7 +14,7 @@ import { ConnectionManagerRequestService } from '../../shared.js';
 import { createLorebookBulkEditor } from './bulk-edit.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.71';
+const VERSION = '1.4.72';
 const entryBulkEditor = createLorebookBulkEditor({
     getBook: currentBookName,
     getRows: renderedEntries,
@@ -33,6 +33,7 @@ const entryBulkEditor = createLorebookBulkEditor({
     onApplied(book, data) {
         state.currentBook = book;
         state.currentBookData = data;
+        renderedEntries().forEach(entry => syncMobileEntryStateBadge(entry));
         renderTokenSummary(book, data);
     },
     onLayout: scheduleResponsiveEntryLayouts,
@@ -158,6 +159,7 @@ const state = {
     entryStateValues: new WeakMap(),
     headerRecoveryTimers: new WeakMap(),
     headerRecoveryAttempts: new WeakMap(),
+    closingEntryDrawers: new WeakSet(),
     backupTimers: new Map(),
     backupOpenPromises: new Map(),
     backupOpenSchedules: new Map(),
@@ -421,7 +423,7 @@ function applyEntryStrategy(entry, value) {
         'select.entryStateSelector',
     ]);
     if (!selector) return false;
-    if (selector.value === value) {
+    if (selector.value === value && !entryBulkEditor.isBulkSource(entry)) {
         syncMobileEntryStateBadge(entry);
         return true;
     }
@@ -4482,10 +4484,24 @@ function bindEntryDrawerLifecycle(entry) {
     if (!entry.dataset.slbDrawerOpen) {
         entry.dataset.slbDrawerOpen = String(isEntryDrawerOpen(entry));
     }
-    // ST가 실제 display 상태를 바꾼 뒤 outer drawer 자체에서 보내는 이벤트다.
-    // nested drawer 이벤트는 버블링되므로 event.target으로 제외한다.
-    drawer.addEventListener('inline-drawer-toggle', event => {
+    // ST emits this via jQuery.trigger BEFORE slideToggle starts. A DOM-only
+    // addEventListener misses that signal and leaves header controls inside the
+    // editor when clearEntryList destroys its options, handlers, and children.
+    jQuery(drawer).off('inline-drawer-toggle.slbLifecycle').on('inline-drawer-toggle.slbLifecycle', event => {
         if (event.target !== drawer) return;
+        const opening = isEntryDrawerOpen(entry); // Native icon is already toggled.
+        entry.dataset.slbDrawerOpen = String(opening);
+        if (opening) state.closingEntryDrawers.delete(entry);
+        else {
+            state.closingEntryDrawers.add(entry);
+            const stash = entry.querySelector('.slb-deferred-header-fields');
+            if (stash) {
+                // Synchronous reparenting preserves the original native handlers.
+                // Do not wait for animation, observer delivery, or background timers.
+                const fields = getResponsiveHeaderFields(entry).filter(field => !field.closest('.slb-entry-header-shell'));
+                if (fields.length) stash.append(...fields);
+            }
+        }
         if (state.entryFilterRefreshPending) {
             setTimeout(refreshEntryStateFilterIfIdle, 350);
         }
@@ -4494,10 +4510,11 @@ function bindEntryDrawerLifecycle(entry) {
             // 아이콘이 아니라 실제 렌더 여부로 열림/닫힘을 기록한다.
             // 애니메이션으로 늦게 닫히는 경우를 위해 ST의 1초 지연 정리
             // (clearEntryList) 전에 두 번 더 재확인해 필드를 회수한다.
-            entry.dataset.slbDrawerOpen = String(isEntryEditorRendered(entry));
+            entry.dataset.slbDrawerOpen = String(!state.closingEntryDrawers.has(entry)
+                && (isEntryEditorRendered(entry) || isEntryDrawerOpen(entry)));
             // 접혀 있을 때는 제목 행만 유지하고, 실제 편집기가 화면에
             // 나타난 순간에만 원문·번역·호출 조건 UI를 만든다.
-            if (isEntryEditorRendered(entry)) enhanceEntry(entry);
+            if (!state.closingEntryDrawers.has(entry) && isEntryEditorRendered(entry)) enhanceEntry(entry);
             placeResponsiveHeaderFields(entry);
         };
         syncFromRender();
@@ -4521,6 +4538,7 @@ function isEntryEditorRendered(entry) {
 
 function isEntryDrawerStablyOpen(entry) {
     if (!entry) return false;
+    if (state.closingEntryDrawers.has(entry)) return false;
     const liveOpen = isEntryEditorRendered(entry) || isEntryDrawerOpen(entry);
     if (!entry.dataset.slbDrawerOpen) {
         entry.dataset.slbDrawerOpen = String(liveOpen);
@@ -4652,7 +4670,8 @@ function placeResponsiveHeaderFields(entry, forceCompact = false) {
     // 기기·브라우저 모드와 무관한 결정적 신호: 호출 조건 패널이 실제로
     // 화면에 렌더되어 있는가. (display:none 조상이 있으면 rect가 0개)
     const activationPanel = overview?.closest('.slb-panel[data-panel="activation"]');
-    const panelVisible = Boolean(activationPanel && activationPanel.getClientRects().length > 0);
+    const closing = state.closingEntryDrawers.has(entry);
+    const panelVisible = !closing && Boolean(activationPanel && activationPanel.getClientRects().length > 0);
 
     // 다섯 필드가 이미 화면에 보이는 overview 안에 있다면 그 상태가 정답이다.
     // 주입 방식을 연속 변경하면 셀렉트 표시 폭이 바뀌며 ResizeObserver가 이
@@ -4674,7 +4693,7 @@ function placeResponsiveHeaderFields(entry, forceCompact = false) {
     // 그 순간에도 마지막 실제 drawer 상태를 읽어야 다섯 필드가 숨김 stash로
     // 빠지지 않는다. 이 검사를 activationActive 뒤로 미루면 호출 조건 첫 줄이
     // 통째로 사라지는 모바일 회귀가 생긴다.
-    const drawerOpen = panelVisible || isEntryDrawerStablyOpen(entry);
+    const drawerOpen = !closing && (panelVisible || isEntryDrawerStablyOpen(entry));
     // 좁은 화면에서도 호출 조건 탭을 보고 있을 때만 editOutlet 내부로
     // 이동한다. 그 외에는 삭제되지 않는 헤더 stash에 안전하게 보관한다.
     const target = compact
@@ -6334,6 +6353,7 @@ function scheduleEntryTokenCount(book, uid, content) {
 function enforceActivationOverviewIntegrity() {
     if (state.sorting) return;
     for (const entry of renderedEntries()) {
+        if (state.closingEntryDrawers.has(entry)) continue;
         const overview = entry.querySelector('.slb-activation-overview');
         if (!overview) continue;
         const panel = overview.closest('.slb-panel[data-panel="activation"]');

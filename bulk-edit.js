@@ -244,5 +244,9 @@ export function createLorebookBulkEditor({ getBook, getRows, getUid, loadBook, s
         syncRows();
     }
 
-    return { ensureToolbar, syncRow, reset, prune };
+    function isBulkSource(row) {
+        return enabled && book === getBook() && selected.size > 1 && selected.has(getUid(row));
+    }
+
+    return { ensureToolbar, syncRow, reset, prune, isBulkSource };
 }
