@@ -7,13 +7,40 @@ import {
 } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
-import { loadWorldInfo, splitKeywordsAndRegexes, saveWorldInfo, setWIOriginalDataValue, updateWorldInfoList, worldInfoFilter, world_names, selected_world_info, world_info } from '../../../world-info.js';
+import { loadWorldInfo, splitKeywordsAndRegexes, saveWorldInfo, setWIOriginalDataValue, updateWorldInfoList, worldInfoFilter, world_names, selected_world_info, world_info, world_info_position } from '../../../world-info.js';
 import { isMobile } from '../../../RossAscends-mods.js';
 import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
+import { createLorebookBulkEditor } from './bulk-edit.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.70';
+const VERSION = '1.4.71';
+const entryBulkEditor = createLorebookBulkEditor({
+    getBook: currentBookName,
+    getRows: renderedEntries,
+    getUid,
+    loadBook: loadWorldInfo,
+    saveBook: saveWorldInfo,
+    setOriginal: setWIOriginalDataValue,
+    atDepth: world_info_position.atDepth,
+    refreshControl(control, entry) {
+        jQuery(control).trigger('input', { noSave: true });
+        if (control.closest('.slb-strategy-field')) {
+            syncMobileEntryStateBadge(entry);
+            scheduleEntryInjectionStateSync(entry);
+        }
+    },
+    onApplied(book, data) {
+        state.currentBook = book;
+        state.currentBookData = data;
+        renderTokenSummary(book, data);
+    },
+    onLayout: scheduleResponsiveEntryLayouts,
+    onError(error) {
+        console.error('[로어북 매니저] 선택 항목 변경 실패', error);
+        notify('선택 항목 변경에 실패했습니다. 설정을 확인하고 다시 시도해주세요.', 'error');
+    },
+});
 const nativeConnectionFilterLists = new WeakMap();
 const TOKEN_CACHE_STORAGE_KEY = 'simple-lorebook/token-cache-v1';
 const TOKEN_CACHE_MAX_BOOKS = 40;
@@ -3892,6 +3919,7 @@ function bindWorkspacePopupObserver(popup) {
         const liveEntries = document.getElementById('world_popup_entries_list');
         const tokenSection = document.getElementById('slb-token-summary-section');
         const filterSection = document.getElementById('slb-entry-filters-section');
+        const selectionToolbar = document.getElementById('slb-entry-selection-toolbar');
         const workspaceMissing = !livePopup
             || !liveEntries
             || liveEntries.parentElement !== livePopup
@@ -3902,7 +3930,9 @@ function bindWorkspacePopupObserver(popup) {
             || filterSection.parentElement !== livePopup
             || !filterSection.querySelector('#slb-entry-filters')
             || tokenSection.nextElementSibling !== filterSection
-            || filterSection.nextElementSibling !== liveEntries
+            || !selectionToolbar
+            || filterSection.nextElementSibling !== selectionToolbar
+            || selectionToolbar.nextElementSibling !== liveEntries
             || state.workspace?.entries !== liveEntries;
 
         // If the entire popup is temporarily detached, wait for its insertion
@@ -3935,9 +3965,10 @@ function createWorkspace() {
     });
 
     bindEntryFilterControls(filters);
+    const selectionToolbar = entryBulkEditor.ensureToolbar(popup, entries);
     // Keep both extension sections together immediately before the current
     // live entries list. Reinsert only when needed to avoid observer loops.
-    if (filterSection.nextElementSibling !== entries) popup.insertBefore(filterSection, entries);
+    if (filterSection.nextElementSibling !== selectionToolbar) popup.insertBefore(filterSection, selectionToolbar);
     if (tokenSection.nextElementSibling !== filterSection) popup.insertBefore(tokenSection, filterSection);
     bindWorkspaceEntries(entries);
     bindWorkspacePopupObserver(popup);
@@ -4141,6 +4172,7 @@ function enhanceEntryHeader(entry, options = {}) {
         if (existingShell && existingGrid && existingTitle && existingResponsiveFields.length === 5) {
             entry.dataset.slbHeaderEnhanced = VERSION;
             restoreNativeDragHandle(entry.querySelector('.slb-entry-header'), existingShell.querySelector('.slb-header-toggles'));
+            entryBulkEditor.syncRow(entry);
             syncEntryHeaderActions(entry);
             syncMobileEntryStateBadge(entry, !deferBadgeTheme);
             observeResponsiveHeader(entry);
@@ -4271,6 +4303,7 @@ function enhanceEntryHeader(entry, options = {}) {
     thinControls?.remove();
 
     entry.dataset.slbHeaderEnhanced = VERSION;
+    entryBulkEditor.syncRow(entry);
     syncEntryHeaderActions(entry);
     syncMobileEntryStateBadge(entry, !deferBadgeTheme);
     observeResponsiveHeader(entry);
@@ -6797,6 +6830,7 @@ function scheduleBookSwitchReadyCheck(delay = 0) {
 }
 
 function beginBookSwitch(book, suppliedBoundary = null) {
+    entryBulkEditor.reset(book);
     const previous = state.bookSwitch;
     if (previous?.timer) clearTimeout(previous.timer);
     state.bookSwitch = null;
@@ -7201,6 +7235,7 @@ function bindEvents() {
             // 상시/선택/벡터 합계만 현재 데이터로 즉시 다시 그린다.
             state.currentBook = name;
             state.currentBookData = data;
+            entryBulkEditor.prune(data);
             scheduleAutomaticLorebookBackup(name);
             renderTokenSummary(name, data);
             const cache = getBookTokenCache(name);
@@ -7319,3 +7354,4 @@ jQuery(() => {
     window.__slbLoreManagerActive = VERSION;
     init();
 });
+

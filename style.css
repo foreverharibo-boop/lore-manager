@@ -4627,3 +4627,86 @@
     opacity: .7;
     padding: 5px 0;
 }
+
+#WorldInfo.slb-active #slb-entry-selection-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    margin: 6px 0;
+    color: var(--SmartThemeBodyColor);
+}
+
+#WorldInfo.slb-active #slb-entry-selection-toolbar .slb-bulk-mode-label {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 6px;
+    min-height: 32px;
+    margin: 0;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+#WorldInfo.slb-active .slb-bulk-selection-tools {
+    display: flex;
+    flex: 1 1 240px;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    min-width: 0;
+}
+
+#WorldInfo.slb-active .slb-bulk-selection-tools[hidden] {
+    display: none !important;
+}
+
+#WorldInfo.slb-active .slb-bulk-selection-tools .menu_button {
+    width: auto;
+    margin: 0;
+    white-space: nowrap;
+}
+
+#WorldInfo.slb-active .slb-bulk-selection-count {
+    white-space: nowrap;
+}
+
+#WorldInfo.slb-active .slb-bulk-selection-status {
+    flex: 1 1 100%;
+    opacity: .8;
+    overflow-wrap: anywhere;
+}
+
+#WorldInfo.slb-active .world_entry .slb-header-toggles > .slb-entry-selection {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 24px;
+    width: 24px !important;
+    min-width: 24px !important;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+#WorldInfo.slb-active .slb-entry-selection-checkbox,
+#WorldInfo.slb-active .slb-bulk-mode {
+    accent-color: var(--SmartThemeQuoteColor, var(--SmartThemeBodyColor));
+    width: 16px !important;
+    height: 16px !important;
+    min-height: 16px !important;
+    margin: 0 !important;
+    cursor: pointer;
+}
+
+#WorldInfo.slb-active .world_entry.slb-bulk-selected {
+    outline: 1px solid var(--SmartThemeQuoteColor, var(--SmartThemeBorderColor));
+    outline-offset: -1px;
+}
+
+#WorldInfo.slb-active .world_entry.slb-bulk-selected > .slb-entry-header,
+#WorldInfo.slb-active .world_entry.slb-bulk-selected .slb-entry-header-shell {
+    background-color: color-mix(in srgb, var(--SmartThemeQuoteColor, currentColor) 8%, transparent);
+}
+
