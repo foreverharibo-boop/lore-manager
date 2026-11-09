@@ -10,13 +10,13 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 function setup(saved = '') {
     const dom = new JSDOM(`<div id="WorldInfo"><div id="world_popup">
       <div><select id="world_info_sort_order" hidden><option value="9" data-field="uid" data-order="asc">UID ↑</option>
-      <option value="1" data-field="comment" data-order="asc">Title ↑</option><option value="search">Search</option></select>
+      <option value="1" data-field="comment" data-order="asc">Title ↑</option><option value="13" data-rule="custom" data-field="displayIndex">Custom</option><option value="search">Search</option></select>
       <button id="world_apply_current_sorting"><i></i></button></div></div></div>`, { runScripts: 'outside-only' });
     const w = dom.window;
     w.structuredClone = structuredClone;
     w.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
     w.HTMLDialogElement.prototype.close = function () { this.open = false; };
-    w.eval(source.replace(/^export /gm, '') + '\nwindow.api={installLoreSortControls,withSideBottomRanks,planInsertionOrders,SIDE_BOTTOM_SORT};');
+    w.eval(source.replace(/^export /gm, '') + '\nwindow.api={installLoreSortControls,planInsertionOrders};');
     const state = { book: 'A', disk: { entries: {
         0: { uid: 0, comment: 'side', content: 'side content', order: 100, STMB_sidePromptRegeneration: { templateKey: 'relationship' } },
         1: { uid: 1, comment: '2029-10-23', content: 'memory', order: 24, vectorized: true, stmemorybooks: true },
@@ -36,7 +36,7 @@ function setup(saved = '') {
             const field = select.selectedOptions[0].dataset.field;
             return entries.sort((a, b) => typeof a[field] === 'string' ? a[field].localeCompare(b[field]) : a[field] - b[field]);
         },
-        getSavedSort: () => saved, refresh: () => state.refreshes++, isFoldy: () => false,
+        getSavedSort: () => saved, setSavedSort: value => {state.saved = value;}, refresh: () => state.refreshes++, isFoldy: () => false,
         notify: (...args) => state.messages.push(args),
     };
     w.api.installLoreSortControls(deps);
@@ -45,41 +45,32 @@ function setup(saved = '') {
     return { w, state, filter, select, open, close, deps };
 }
 
-test('visible native select preserves listeners and saved side-bottom mode without saving entry data', () => {
+test('removed side-sort selection migrates to native Custom without saving lorebook data', () => {
     const h = setup('slb-side-bottom');
     try {
         const before = JSON.stringify(h.state.disk);
         h.w.api.installLoreSortControls(h.deps);
         assert.equal(h.w.document.querySelectorAll('#slb-sort-controls').length, 1);
         assert.equal(h.select.hidden, false);
-        assert.equal(h.select.parentElement.id, 'slb-sort-controls');
-        assert.equal(h.select.value, 'slb-side-bottom');
-        h.select.dispatchEvent(new h.w.Event('change', { bubbles: true }));
+        assert.equal(h.select.value, '13');
+        assert.equal(h.state.saved, '13');
         assert.equal(h.state.changes, 1);
-        const ranks = h.filter.filterFunctions.slbSideBottomSort(Object.values(h.state.disk.entries));
-        assert.deepEqual(Array.from(ranks, e => e.uid), [1, 2, 0]);
+        assert.equal(h.select.querySelector('[value="slb-side-bottom"]'), null);
+        assert.equal(Object.keys(h.filter.filterFunctions).length, 0);
         assert.equal(JSON.stringify(h.state.disk), before);
         assert.equal(h.state.writes.length, 0);
-        h.select.value = '9';
-        const entries = Object.values(h.state.disk.entries);
-        assert.equal(h.filter.filterFunctions.slbSideBottomSort(entries), entries);
     } finally { h.close(); }
 });
 
-test('side rank is global before pagination and updates for new memories and both metadata generations', () => {
-    const h = setup();
+test('unrelated native sort and its original change listeners remain intact', () => {
+    const h = setup('9');
     try {
-        const entries = Array.from({ length: 1002 }, (_, uid) => ({ uid, order: 24, content: 'same', vectorized: true }));
-        entries[0].STMB_sidePromptHistory = { templateKey: 'a' };
-        entries[700].STMB_sidePromptRegeneration = { templateKey: 'b' };
-        const before = JSON.stringify(entries);
-        const result = h.w.api.withSideBottomRanks(entries);
-        assert.deepEqual(Array.from(result.slice(-2), e => e.uid), [0, 700]);
-        assert.equal(result.slice(0, 500).some(e => e.uid === 0 || e.uid === 700), false);
-        assert.equal(JSON.stringify(entries), before);
-        assert.equal(Object.keys(result[0]).some(key => key.startsWith('__slb')), false);
-        entries.push({ uid: 1002, comment: 'new memory' });
-        assert.deepEqual(Array.from(h.w.api.withSideBottomRanks(entries).slice(-3), e => e.uid), [1002, 0, 700]);
+        assert.equal(h.select.value, '9');
+        assert.equal(h.state.saved, undefined);
+        h.select.value = '1';
+        h.select.dispatchEvent(new h.w.Event('change', {bubbles:true}));
+        assert.equal(h.state.changes, 1);
+        assert.equal(h.state.writes.length, 0);
     } finally { h.close(); }
 });
 
@@ -102,16 +93,16 @@ test('arrow opens one preview and cancel/Escape never changes priorities or invo
 });
 
 test('Apply uses the preview for all entries and changes only insertion priority', async () => {
-    const h = setup('slb-side-bottom');
+    const h = setup();
     try {
         const before = structuredClone(h.state.disk);
         await h.open();
         h.w.document.querySelector('form').dispatchEvent(new h.w.Event('submit', { cancelable: true }));
         await tick();
         assert.equal(h.state.writes.length, 1);
-        assert.equal(h.state.disk.entries[1].order, 100);
-        assert.equal(h.state.disk.entries[2].order, 99);
-        assert.equal(h.state.disk.entries[0].order, 98);
+        assert.equal(h.state.disk.entries[1].order, 99);
+        assert.equal(h.state.disk.entries[2].order, 98);
+        assert.equal(h.state.disk.entries[0].order, 100);
         for (const [uid, entry] of Object.entries(h.state.disk.entries)) {
             assert.deepEqual({ ...entry, order: before.entries[uid].order }, before.entries[uid]);
         }

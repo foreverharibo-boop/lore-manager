@@ -16,7 +16,7 @@ import { createLorebookBulkEditor } from './bulk-edit.js';
 import { installLoreSortControls } from './lore-sort.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.74';
+const VERSION = '1.4.75';
 const entryBulkEditor = createLorebookBulkEditor({
     getBook: currentBookName,
     getRows: renderedEntries,
@@ -7311,9 +7311,10 @@ function init() {
     loadPersistedTokenCache();
     installEntryStateFilter();
     installLoreSortControls({
-        document, filter: worldInfoFilter, getBook: currentBookName,
+        document, getBook: currentBookName,
         loadBook: loadWorldInfo, saveBook: saveWorldInfo, setOriginal: setWIOriginalDataValue,
         sortEntries: sortWorldInfoEntries, getSavedSort: () => accountStorage.getItem('world_info_sort_order'),
+        setSavedSort: value => accountStorage.setItem('world_info_sort_order', value),
         refresh: () => document.getElementById('world_refresh')?.click(),
         isFoldy: isFoldyLinkedMode, notify,
     });
