@@ -7,16 +7,14 @@ import {
 } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
-import { loadWorldInfo, splitKeywordsAndRegexes, saveWorldInfo, setWIOriginalDataValue, updateWorldInfoList, worldInfoFilter, world_names, selected_world_info, world_info, world_info_position, sortWorldInfoEntries } from '../../../world-info.js';
-import { accountStorage } from '../../../util/AccountStorage.js';
+import { loadWorldInfo, splitKeywordsAndRegexes, saveWorldInfo, setWIOriginalDataValue, updateWorldInfoList, worldInfoFilter, world_names, selected_world_info, world_info, world_info_position } from '../../../world-info.js';
 import { isMobile } from '../../../RossAscends-mods.js';
 import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 import { createLorebookBulkEditor } from './bulk-edit.js';
-import { installLoreSortControls } from './lore-sort.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.75';
+const VERSION = '1.4.76';
 const entryBulkEditor = createLorebookBulkEditor({
     getBook: currentBookName,
     getRows: renderedEntries,
@@ -7310,14 +7308,6 @@ function init() {
     state.settingsMigrationNeeded = false;
     loadPersistedTokenCache();
     installEntryStateFilter();
-    installLoreSortControls({
-        document, getBook: currentBookName,
-        loadBook: loadWorldInfo, saveBook: saveWorldInfo, setOriginal: setWIOriginalDataValue,
-        sortEntries: sortWorldInfoEntries, getSavedSort: () => accountStorage.getItem('world_info_sort_order'),
-        setSavedSort: value => accountStorage.setItem('world_info_sort_order', value),
-        refresh: () => document.getElementById('world_refresh')?.click(),
-        isFoldy: isFoldyLinkedMode, notify,
-    });
     worldInfo.classList.add('slb-active');
     ensureCriticalLayoutStyles();
     createAIBar();
