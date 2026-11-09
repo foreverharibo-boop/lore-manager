@@ -1,17 +1,4 @@
 // Display sorting must never rewrite insertion priority or persisted entry data.
-export const SIDE_BOTTOM_SORT = 'slb-side-bottom';
-const RANK_FIELD = '__slbSideBottomRank';
-
-export function withSideBottomRanks(entries) {
-    const isSide = entry => Boolean(entry.STMB_sidePromptHistory?.templateKey
-        || entry.STMB_sidePromptRegeneration?.templateKey
-        || String(entry.comment || '').trimEnd().endsWith(' (STMB SidePrompt)'));
-    const sorted = entries.map((entry, index) => ({ entry, index })).sort((a, b) =>
-        Number(isSide(a.entry)) - Number(isSide(b.entry))
-        || Number(a.entry.uid) - Number(b.entry.uid) || a.index - b.index);
-    return sorted.map(({ entry }, rank) => Object.defineProperty({ ...entry }, RANK_FIELD, { value: rank }));
-}
-
 export function planInsertionOrders(entries, start, step, ascending) {
     if (start === '' || step === '' || !Number.isSafeInteger(Number(start))
         || !Number.isSafeInteger(Number(step)) || Number(start) < 0 || Number(step) < 1) {
@@ -26,8 +13,8 @@ export function planInsertionOrders(entries, start, step, ascending) {
     });
 }
 
-export function installLoreSortControls({ document, filter, getBook, loadBook, saveBook,
-    setOriginal, sortEntries, getSavedSort, refresh, isFoldy, notify }) {
+export function installLoreSortControls({ document, getBook, loadBook, saveBook,
+    setOriginal, sortEntries, getSavedSort, setSavedSort, refresh, isFoldy, notify }) {
     const select = document.getElementById('world_info_sort_order');
     const popup = document.getElementById('world_popup');
     if (!select || !popup || document.getElementById('slb-sort-controls')) return;
@@ -37,14 +24,6 @@ export function installLoreSortControls({ document, filter, getBook, loadBook, s
         node.className = className;
         return node;
     };
-    const option = el('option', 'UID ↑ · 사이드 맨 아래');
-    option.value = SIDE_BOTTOM_SORT;
-    option.dataset.field = RANK_FIELD;
-    option.dataset.order = 'asc';
-    select.append(option);
-    filter.filterFunctions.slbSideBottomSort = entries => select.value === SIDE_BOTTOM_SORT
-        ? withSideBottomRanks(entries) : entries;
-
     // Move the original select, retaining ST and Foldy's change listeners and options.
     const toolbar = el('div', '', 'slb-sort-controls');
     toolbar.id = 'slb-sort-controls';
@@ -56,7 +35,16 @@ export function installLoreSortControls({ document, filter, getBook, loadBook, s
     toolbar.append(label, select);
     popup.prepend(toolbar);
     const saved = getSavedSort();
-    if (saved === SIDE_BOTTOM_SORT && !isFoldy()) select.value = saved;
+    if (saved === 'slb-side-bottom') {
+        const custom = Array.from(select.options).find(option => option.dataset.rule === 'custom');
+        if (custom) {
+            setSavedSort(custom.value);
+            if (!isFoldy()) {
+                select.value = custom.value;
+                select.dispatchEvent(new document.defaultView.Event('change', { bubbles: true }));
+            }
+        }
+    }
 
     const button = document.getElementById('world_apply_current_sorting');
     if (button) {
@@ -84,7 +72,7 @@ export function installLoreSortControls({ document, filter, getBook, loadBook, s
             if (!entries.length) throw new Error('변경할 항목이 없습니다.');
             // Native custom order uses displayIndex, with UID as the legacy fallback.
             const prepared = entries.map(entry => ({ ...entry, displayIndex: entry.displayIndex ?? entry.uid }));
-            const sorted = sortEntries(sortValue === SIDE_BOTTOM_SORT ? withSideBottomRanks(prepared) : prepared);
+            const sorted = sortEntries(prepared);
             const dialog = el('dialog', '', 'slb-order-dialog');
             dialog.id = 'slb-order-dialog';
             dialog.setAttribute('aria-labelledby', 'slb-order-title');
