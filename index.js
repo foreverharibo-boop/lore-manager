@@ -14,7 +14,7 @@ import { ConnectionManagerRequestService } from '../../shared.js';
 import { createLorebookBulkEditor } from './bulk-edit.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.72';
+const VERSION = '1.4.73';
 const entryBulkEditor = createLorebookBulkEditor({
     getBook: currentBookName,
     getRows: renderedEntries,
@@ -2233,11 +2233,21 @@ function openBackupDatabase() {
     });
 }
 
-async function listLorebookBackups() {
+async function listLorebookBackups(full = false) {
     const database = await openBackupDatabase();
     try {
         const transaction = database.transaction(BACKUP_STORE_NAME, 'readonly');
-        const records = await backupRequest(transaction.objectStore(BACKUP_STORE_NAME).getAll());
+        const records = await new Promise((resolve, reject) => {
+            const rows = [], request = transaction.objectStore(BACKUP_STORE_NAME).openCursor();
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                const cursor = request.result;
+                if (!cursor) { resolve(rows); return; }
+                const { lorebook, translations, ...header } = cursor.value;
+                rows.push(full ? cursor.value : header);
+                cursor.continue();
+            };
+        });
         await backupTransactionDone(transaction);
         return records.sort((left, right) => Number(right.createdAt) - Number(left.createdAt));
     } finally {
@@ -3259,7 +3269,7 @@ function createAIBar() {
         const button = event.currentTarget;
         button.disabled = true;
         try {
-            const records = await listLorebookBackups();
+            const records = await listLorebookBackups(true);
             if (!records.length) throw new Error('내보낼 로어북 백업이 없습니다.');
             const date = new Date().toISOString().slice(0, 10);
             downloadJsonFile(`lorebook-backups-${date}.json`, backupExportEnvelope(records));
