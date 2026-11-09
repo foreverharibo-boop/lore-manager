@@ -391,6 +391,41 @@
     pointer-events: none;
 }
 
+.slb-sort-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin-block: 8px;
+}
+#WorldInfo.slb-active #slb-sort-controls #world_info_sort_order {
+    display: block !important;
+    visibility: visible !important;
+    flex: 1 1 180px;
+    width: auto !important;
+    min-width: 0;
+    max-width: 100%;
+    height: auto !important;
+    opacity: 1 !important;
+}
+.slb-order-dialog {
+    box-sizing: border-box;
+    width: min(560px, calc(100vw - 24px));
+    max-height: calc(100dvh - 24px);
+    overflow: auto;
+    padding: 18px;
+    border: 1px solid var(--SmartThemeBorderColor, #888);
+    border-radius: 10px;
+    background: var(--SmartThemeBlurTintColor, #242424);
+    color: var(--SmartThemeBodyColor, #eee);
+}
+.slb-order-dialog::backdrop { background: #0008; }
+.slb-order-dialog form { display: grid; gap: 12px; }
+.slb-order-dialog label { display: flex; align-items: center; gap: 8px; }
+.slb-order-dialog input[type="number"] { width: 110px; }
+.slb-order-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
+
 .slb-export-modal-overlay {
     position: fixed;
     z-index: 100000;
