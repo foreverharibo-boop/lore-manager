@@ -396,19 +396,16 @@
 
 #WorldInfo.slb-active .slb-native-sort {
     position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 30px;
-    width: 30px;
-    height: 30px;
-    margin: 0;
-    padding: 0;
+    flex: 0 0 auto;
 }
 
-#WorldInfo.slb-active .slb-native-sort:focus-within {
-    outline: 2px solid currentColor;
-    outline-offset: 2px;
+#WorldInfo.slb-active .slb-native-sort:has(select:focus-visible) {
+    outline: 1px solid currentColor;
+    outline-offset: 0;
+}
+
+#WorldInfo.slb-active #world_info_sort_order option[data-rule='custom'] {
+    display: none;
 }
 
 #WorldInfo.slb-active .slb-native-sort #world_info_sort_order {

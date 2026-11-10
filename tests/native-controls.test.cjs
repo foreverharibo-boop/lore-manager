@@ -39,9 +39,13 @@ test('compact control preserves the native select, options and change listeners 
         assert.equal(f.w.document.querySelectorAll('#slb-search-sort').length, 1);
         assert.equal(f.w.document.querySelector('.slb-native-sort select'), f.sort);
         assert.deepEqual([...f.sort.options], options);
+        assert.equal(f.sort.querySelector('[data-rule="custom"]').hidden, true);
+        assert.equal(f.sort.options[0].hidden, false);
         f.sort.value = '13';
         f.sort.dispatchEvent(new f.w.Event('change'));
         assert.deepEqual(f.calls, [['change', '13']]);
+        f.w.compactNativeSort(f.w.document);
+        assert.equal(f.sort.title, '항목 정렬');
     } finally { f.dom.window.close(); }
 });
 

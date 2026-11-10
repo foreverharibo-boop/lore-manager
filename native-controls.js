@@ -3,6 +3,10 @@ export function compactNativeSort(document) {
     const search = document.getElementById('world_info_search');
     const sort = document.getElementById('world_info_sort_order');
     if (!search || !sort) return;
+    // Keep ST's internal drag-order value for saving, but omit it from the picker.
+    for (const option of sort.options) {
+        if (option.dataset.rule === 'custom' && !option.hidden) option.hidden = true;
+    }
     let group = document.getElementById('slb-search-sort');
     if (!group) {
         group = document.createElement('div');
@@ -13,16 +17,15 @@ export function compactNativeSort(document) {
     let control = group.querySelector('.slb-native-sort');
     if (!control) {
         control = document.createElement('div');
-        control.className = 'slb-native-sort menu_button';
-        const icon = document.createElement('i');
-        icon.className = 'fa-solid fa-arrow-down-wide-short';
-        icon.setAttribute('aria-hidden', 'true');
-        control.append(icon);
+        control.className = 'slb-native-sort menu_button fa-solid fa-arrow-down-wide-short';
         group.append(control);
     }
     if (sort.parentElement !== control) control.append(sort);
     sort.setAttribute('aria-label', '항목 정렬');
-    const title = `항목 정렬: ${sort.selectedOptions[0]?.textContent?.trim() || ''}`;
+    const selected = sort.selectedOptions[0];
+    const title = selected?.dataset.rule === 'custom'
+        ? '항목 정렬'
+        : `항목 정렬: ${selected?.textContent?.trim() || ''}`;
     if (sort.title !== title) sort.title = title;
 }
 
