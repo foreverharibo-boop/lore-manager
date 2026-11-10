@@ -11,6 +11,48 @@ function productionFunction(name) {
     return match[0];
 }
 
+test('initial detached header assembly keeps exactly one original drag handle before any recovery pass', () => {
+    const dom = new JSDOM('<div id="world_popup_entries_list"></div>', { runScripts: 'outside-only' });
+    const w = dom.window;
+    w.eval(`
+        const isFoldyLinkedMode = () => false;
+        const enableNativeEntryDrag = () => true;
+        const jQuery = {}, currentBookName = () => 'test', notify = () => {};
+        ${productionFunction('restoreNativeDragHandle')}
+    `);
+    try {
+        // Match enhanceEntryHeader: the native handle is moved into toggles
+        // before toggles/shell are attached back to the header.
+        for (let index = 0; index < 113; index++) {
+            const header = w.document.createElement('div');
+            header.innerHTML = '<span class="drag-handle">☰</span>';
+            w.document.getElementById('world_popup_entries_list').append(header);
+            const native = header.firstElementChild;
+            const toggles = w.document.createElement('div');
+            toggles.className = 'slb-header-toggles';
+            toggles.append(native);
+            w.restoreNativeDragHandle(header, toggles);
+            header.append(toggles);
+            assert.equal(header.querySelectorAll('.drag-handle').length, 1, `first render row ${index}`);
+            assert.equal(toggles.firstElementChild, native, 'reuse original node');
+            w.restoreNativeDragHandle(header, toggles);
+            assert.equal(toggles.firstElementChild, native, 'recovery leaves the same node in place');
+        }
+        const header = w.document.createElement('div');
+        const toggles = w.document.createElement('div');
+        w.restoreNativeDragHandle(header, toggles);
+        header.append(toggles);
+        const added = toggles.firstElementChild;
+        assert.ok(added.matches('.drag-handle'), 'missing native handle is still restored');
+        const duplicate = w.document.createElement('span');
+        duplicate.className = 'drag-handle';
+        header.prepend(duplicate);
+        w.restoreNativeDragHandle(header, toggles);
+        assert.equal(header.querySelectorAll('.drag-handle').length, 1);
+        assert.equal(toggles.firstElementChild, added, 'prefer the already placed handle');
+    } finally { w.close(); }
+});
+
 test('jQuery close before slide animation preserves native controls through destructive cleanup and reopen', () => {
     const dom = new JSDOM('<div id="world_popup_entries_list"></div>', { runScripts: 'outside-only' });
     const w = dom.window;

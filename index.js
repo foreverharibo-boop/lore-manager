@@ -15,7 +15,7 @@ import { createLorebookBulkEditor } from './bulk-edit.js';
 import { compactNativeSort, enableNativeEntryDrag } from './native-controls.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.78';
+const VERSION = '1.4.79';
 const entryBulkEditor = createLorebookBulkEditor({
     getBook: currentBookName,
     getRows: renderedEntries,
@@ -4150,7 +4150,14 @@ function ensureNativeHeaderField(entry, config, className, fallbackLabel) {
 
 function restoreNativeDragHandle(header, toggles) {
     if (!header || !toggles) return null;
-    const handles = Array.from(header.querySelectorAll('.drag-handle, .slb-entry-drag-handle'));
+    // Initial header assembly moves the original handle into detached toggles.
+    // Check that destination first; searching only header would create a second
+    // handle until the next enhancement pass. Deduplicate overlapping scopes.
+    const selector = '.drag-handle, .slb-entry-drag-handle';
+    const handles = Array.from(new Set([
+        ...toggles.querySelectorAll(selector),
+        ...header.querySelectorAll(selector),
+    ]));
     let handle = handles.find(element => !element.classList.contains('slb-entry-drag-handle'))
         || handles[0]
         || null;
