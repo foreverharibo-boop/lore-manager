@@ -12,9 +12,10 @@ import { isMobile } from '../../../RossAscends-mods.js';
 import { select2ModifyOptions } from '../../../utils.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 import { createLorebookBulkEditor } from './bulk-edit.js';
+import { compactNativeSort, enableNativeEntryDrag } from './native-controls.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.76';
+const VERSION = '1.4.77';
 const entryBulkEditor = createLorebookBulkEditor({
     getBook: currentBookName,
     getRows: renderedEntries,
@@ -3955,6 +3956,8 @@ function bindWorkspacePopupObserver(popup) {
 }
 
 function createWorkspace() {
+    compactNativeSort(document);
+    enableNativeEntryDrag({ document, jQuery, isFoldy: isFoldyLinkedMode, getBook: currentBookName, notify });
     const popup = document.getElementById('world_popup');
     const entries = document.getElementById('world_popup_entries_list');
     if (!popup || !entries) return;
@@ -4148,9 +4151,13 @@ function ensureNativeHeaderField(entry, config, className, fallbackLabel) {
 function restoreNativeDragHandle(header, toggles) {
     if (!header || !toggles) return null;
     const handles = Array.from(header.querySelectorAll('.drag-handle, .slb-entry-drag-handle'));
-    const handle = handles.find(element => !element.classList.contains('slb-entry-drag-handle'))
+    let handle = handles.find(element => !element.classList.contains('slb-entry-drag-handle'))
         || handles[0]
         || null;
+    if (!handle && !isFoldyLinkedMode()
+        && enableNativeEntryDrag({ document, jQuery, isFoldy: isFoldyLinkedMode, getBook: currentBookName, notify })) {
+        handle = document.createElement('span');
+    }
     if (!handle) return null;
     handles.filter(element => element !== handle).forEach(element => element.remove());
     handle.classList.remove('slb-entry-drag-handle', 'fa-solid', 'fa-grip-vertical', 'fa-grip-lines', 'menu_button');

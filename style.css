@@ -378,14 +378,61 @@
     flex-wrap: wrap;
 }
 
-/* Keep SillyTavern's original sorting controls in the native toolbar. */
-#WorldInfo.slb-active #world_info_sort_order {
+/* One shrinking search field and the real native select over a compact icon. */
+#WorldInfo.slb-active #slb-search-sort {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 1 1 120px;
+    min-width: 0;
+}
+
+#WorldInfo.slb-active #slb-search-sort #world_info_search {
+    flex: 1 1 0;
+    min-width: 0;
+    width: 0;
+    margin: 0;
+}
+
+#WorldInfo.slb-active .slb-native-sort {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 30px;
+    width: 30px;
+    height: 30px;
+    margin: 0;
+    padding: 0;
+}
+
+#WorldInfo.slb-active .slb-native-sort:focus-within {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}
+
+#WorldInfo.slb-active .slb-native-sort #world_info_sort_order {
+    position: absolute;
+    inset: 0;
     display: block !important;
     visibility: visible !important;
-    opacity: 1 !important;
-    flex: 0 1 auto;
+    opacity: 0 !important;
+    width: 100% !important;
+    height: 100%;
     min-width: 0;
-    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+}
+
+#WorldInfo.slb-active .slb-header-toggles > .drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    min-height: 28px;
+    cursor: grab;
+    touch-action: none;
 }
 
 #WorldInfo.slb-active #world_import_button,
