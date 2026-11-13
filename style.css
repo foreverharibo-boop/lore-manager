@@ -1074,6 +1074,14 @@
     display: none;
 }
 
+#WorldInfo.slb-active .slb-source-pane.slb-source-hidden {
+    display: none !important;
+}
+
+#WorldInfo.slb-active [name="contentAndCharFilterBlock"].slb-content-grid.slb-translation-only {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 #WorldInfo.slb-active .slb-entry-editor-head {
     flex-wrap: nowrap;
     box-sizing: border-box;

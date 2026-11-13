@@ -7,7 +7,7 @@ const makeJQuery = require('jquery');
 const code = readFileSync(require('node:path').join(__dirname, '../bulk-edit.js'), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function setup(mobile = false) {
+function setup(mobile = false, onDelete = undefined) {
     const dom = new JSDOM('<div id="world_popup"><div id="world_popup_entries_list"></div></div>', { runScripts: 'outside-only' });
     const { window: w } = dom;
     const $ = makeJQuery(w);
@@ -61,7 +61,7 @@ function setup(mobile = false) {
         getBook: () => book, getRows: rows, getUid: row => row.dataset.uid,
         loadBook: name => load(name), saveBook: async name => { saves.push(`bulk:${name}`); },
         setOriginal, atDepth: 4, refreshControl: control => $(control).trigger('input', { noSave: true }),
-        onApplied() {}, onLayout() {}, onError: error => errors.push(error.message),
+        onDelete, onApplied() {}, onLayout() {}, onError: error => errors.push(error.message),
     });
     function render(ids = [0, 1, 2]) {
         list.replaceChildren();
@@ -245,5 +245,43 @@ test('mobile picker reapplies the same strategy to other selected entries', asyn
         f.w.applyStrategy(f.rows()[1], 'normal');
         await flush();
         assert.equal(f.saves.length, saveCount, 'ordinary single entry unchanged value stays a no-op');
+    } finally { f.close(); }
+});
+
+
+test('action snapshots include off-page UIDs, reject unselected rows and expire on selection changes', async () => {
+    const f = setup();
+    try {
+        f.mode(); f.choose(0); f.choose(1);
+        const job = f.editor.actionSelection(f.rows()[0]);
+        assert.deepEqual(Array.from(job.uids), ['0', '1']);
+        assert.equal(f.editor.actionSelection(f.rows()[2]), null);
+        assert.equal(f.editor.isCurrentSelection(job), true);
+        f.render([1, 2]);
+        assert.equal(f.editor.isCurrentSelection(job), true);
+        assert.deepEqual(Array.from(f.editor.actionSelection(f.rows()[0]).uids), ['0', '1']);
+        f.choose(1);
+        assert.equal(f.editor.isCurrentSelection(job), false);
+        f.switchBook('B');
+        assert.equal(f.editor.actionSelection(f.rows()[0]), null);
+    } finally { f.close(); }
+});
+
+test('selected delete intercepts native handler once, while unselected delete stays native', async () => {
+    let finish, calls = 0, native = 0;
+    const f = setup(false, () => { calls++; return new Promise(resolve => { finish = resolve; }); });
+    try {
+        f.mode(); f.choose(0); f.choose(1);
+        const buttons = f.rows().map(row => {
+            const button = f.document.createElement('button');
+            button.className = 'delete_entry_button';
+            button.addEventListener('click', () => native++);
+            row.append(button); return button;
+        });
+        buttons[0].click(); buttons[1].click(); await flush();
+        assert.equal(calls, 1); assert.equal(native, 0);
+        buttons[2].click(); assert.equal(native, 1);
+        finish(); await flush();
+        f.mode(); buttons[0].click(); assert.equal(native, 2);
     } finally { f.close(); }
 });

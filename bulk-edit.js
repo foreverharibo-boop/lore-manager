@@ -47,7 +47,7 @@ function patchEntry(data, uid, patch, setOriginal) {
 }
 
 export function createLorebookBulkEditor({ getBook, getRows, getUid, loadBook, saveBook,
-    setOriginal, atDepth, refreshControl, onApplied, onLayout, onError }) {
+    setOriginal, atDepth, refreshControl, onApplied, onLayout, onError, onDelete }) {
     let book = '';
     let enabled = false;
     let revision = 0;
@@ -55,6 +55,7 @@ export function createLorebookBulkEditor({ getBook, getRows, getUid, loadBook, s
     let entriesRoot = null;
     let applying = false;
     let selectingAll = false;
+    let deleting = false;
     const selected = new Set();
     let queue = Promise.resolve();
 
@@ -66,7 +67,7 @@ export function createLorebookBulkEditor({ getBook, getRows, getUid, loadBook, s
         toolbar.querySelector('.slb-bulk-selection-count').textContent = `${selected.size}개 선택 중`;
         toolbar.querySelector('.slb-bulk-select-all').disabled = selectingAll;
         toolbar.querySelector('.slb-bulk-selection-status').textContent = message
-            || '전략·위치·깊이·순서·발동 확률: 바꾼 설정만 선택 항목에 적용';
+            || '설정 변경·삭제·번역: 선택한 항목에서 실행하면 선택 목록에 함께 적용';
     }
 
     function syncRow(row) {
@@ -172,9 +173,11 @@ export function createLorebookBulkEditor({ getBook, getRows, getUid, loadBook, s
         if (entriesRoot !== entries) {
             entriesRoot?.removeEventListener('input', handleInput, true);
             entriesRoot?.removeEventListener('change', handleInput, true);
+            entriesRoot?.removeEventListener('click', handleDelete, true);
             entriesRoot = entries;
             entries.addEventListener('input', handleInput, true);
             entries.addEventListener('change', handleInput, true);
+            entries.addEventListener('click', handleDelete, true);
         }
         updateToolbar();
         return toolbar;
@@ -240,13 +243,35 @@ export function createLorebookBulkEditor({ getBook, getRows, getUid, loadBook, s
 
     function prune(data) {
         if (!enabled || book !== getBook() || !data?.entries) return;
-        for (const uid of selected) if (!data.entries[uid]) selected.delete(uid);
+        for (const uid of selected) if (!data.entries[uid]) { selected.delete(uid); revision++; }
         syncRows();
+    }
+
+    // Snapshot UIDs, never row positions: selection can span pages and filters.
+    function actionSelection(row) {
+        if (!enabled || book !== getBook() || !getRows().includes(row) || !selected.has(getUid(row))) return null;
+        return { book, revision, uids: [...selected] };
+    }
+
+    function isCurrentSelection(job) {
+        return enabled && book === job.book && getBook() === job.book && revision === job.revision;
+    }
+
+    function handleDelete(event) {
+        const button = event.target instanceof Element ? event.target.closest('.delete_entry_button') : null;
+        const job = button && actionSelection(button.closest('.world_entry'));
+        if (!job || !onDelete) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (deleting) return;
+        deleting = true;
+        queue = queue.then(() => isCurrentSelection(job) && onDelete(job))
+            .catch(onError).finally(() => { deleting = false; });
     }
 
     function isBulkSource(row) {
         return enabled && book === getBook() && selected.size > 1 && selected.has(getUid(row));
     }
 
-    return { ensureToolbar, syncRow, reset, prune, isBulkSource };
+    return { ensureToolbar, syncRow, reset, prune, isBulkSource, actionSelection, isCurrentSelection };
 }
