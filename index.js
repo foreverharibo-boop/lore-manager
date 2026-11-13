@@ -16,7 +16,7 @@ import { createLorebookBulkEditor } from './bulk-edit.js';
 import { compactNativeSort, enableNativeEntryDrag } from './native-controls.js';
 
 const EXTENSION_NAME = 'simple-lorebook';
-const VERSION = '1.4.80';
+const VERSION = '1.4.81';
 const entryBulkEditor = createLorebookBulkEditor({
     getBook: currentBookName,
     getRows: renderedEntries,
@@ -3542,28 +3542,35 @@ async function translateCurrentLorebook(mode = 'all', selection = null) {
             updateBulkTranslationStatus(mode === 'missing' ? '번역할 미번역 항목이 없습니다.' : '번역할 항목이 없습니다.');
             return;
         }
-        for (let index = 0; index < entries.length && !job.cancelled; index += 1) {
-            if (currentBookName() !== book) { job.cancelled = true; break; }
-            const entry = entries[index];
+        // Each worker keeps its own UID and content snapshot. A completed result
+        // can be applied immediately even while earlier requests are still pending.
+        const concurrency = mode === 'selected' && getSettings().translationProvider !== 'google' ? 3 : 1;
+        const showProgress = () => updateBulkTranslationStatus(
+            `${book} · ${jobLabel} ${succeeded + failed + skipped}/${entries.length} (완료 ${succeeded}, 실패 ${failed}, 건너뜀 ${skipped})`,
+        );
+        let checkpoint = Promise.resolve();
+        showProgress();
+        await mapLimit(entries, concurrency, async entry => {
+            if (currentBookName() !== book) job.cancelled = true;
+            if (job.cancelled) return;
             const uid = String(entry.uid);
-            if (data.entries[uid] !== entry) { skipped += 1; continue; }
-            const open = renderedEntries().find(element => getUid(element) === uid);
-            const ui = open?.querySelector('.world_entry_edit')?.slbTranslationUI;
-            const source = ui?.source.value ?? entry.content;
-            const pair = ui
-                ? { sourceLanguage: ui.sourceLanguage, translationLanguage: ui.translationLanguage }
-                : getEntryLanguagePair(book, uid);
-            if (!source.trim() || ui?.flags.translating || mode === 'missing' && hasEntryTranslation(book, entry)) {
-                skipped += 1;
-                continue;
-            }
-            const previous = getSettings().translations[translationKey(book, uid)];
-            const translationBefore = ui?.translation.value;
-            updateBulkTranslationStatus(`${book} · ${jobLabel} ${index + 1}/${entries.length} (완료 ${succeeded}, 실패 ${failed})`);
             try {
+                if (data.entries[uid] !== entry) { skipped += 1; return; }
+                const open = renderedEntries().find(element => getUid(element) === uid);
+                const ui = open?.querySelector('.world_entry_edit')?.slbTranslationUI;
+                const source = ui?.source.value ?? entry.content;
+                const pair = ui
+                    ? { sourceLanguage: ui.sourceLanguage, translationLanguage: ui.translationLanguage }
+                    : getEntryLanguagePair(book, uid);
+                if (!source.trim() || ui?.flags.translating || mode === 'missing' && hasEntryTranslation(book, entry)) {
+                    skipped += 1;
+                    return;
+                }
+                const previous = getSettings().translations[translationKey(book, uid)];
+                const translationBefore = ui?.translation.value;
                 const translated = await translateText(source, pair.translationLanguage);
                 if (!translated?.trim()) throw new Error('번역 결과가 비어 있습니다.');
-                if (job.cancelled) break;
+                if (job.cancelled) return;
                 const latest = getSettings().translations[translationKey(book, uid)];
                 if (
                     currentBookName() !== book || data.entries[uid] !== entry || ui?.flags.deleted
@@ -3573,14 +3580,14 @@ async function translateCurrentLorebook(mode = 'all', selection = null) {
                     || ui && (ui.sourceLanguage !== pair.sourceLanguage || ui.translationLanguage !== pair.translationLanguage)
                 ) {
                     skipped += 1;
-                    continue;
+                    return;
                 }
                 const liveUI = renderedEntries().find(row => getUid(row) === uid)
                     ?.querySelector('.world_entry_edit')?.slbTranslationUI;
                 if (liveUI && (liveUI.source.value !== source || liveUI.translation.value !== (translationBefore ?? previous?.text ?? '')
                     || liveUI.sourceLanguage !== pair.sourceLanguage || liveUI.translationLanguage !== pair.translationLanguage)) {
                     skipped += 1;
-                    continue;
+                    return;
                 }
                 if (liveUI) {
                     liveUI.flags.writingTranslation = true;
@@ -3596,12 +3603,19 @@ async function translateCurrentLorebook(mode = 'all', selection = null) {
                     });
                 }
                 succeeded += 1;
-                if (succeeded % 5 === 0) await saveSettings();
+                if (succeeded % 5 === 0) {
+                    // Serialize checkpoints; multiple workers must not save older
+                    // settings snapshots over one another.
+                    checkpoint = checkpoint.catch(() => undefined).then(() => saveSettings());
+                    await checkpoint;
+                }
             } catch (error) {
                 failed += 1;
                 console.warn('[로어북 매니저] 전체 번역 항목 실패', uid, error);
+            } finally {
+                showProgress();
             }
-        }
+        });
         await saveSettings();
         const summary = `${book} ${jobLabel} ${job.cancelled ? '중단' : '완료'} · 성공 ${succeeded}개, 실패 ${failed}개, 건너뜀 ${skipped}개`;
         updateBulkTranslationStatus(summary);

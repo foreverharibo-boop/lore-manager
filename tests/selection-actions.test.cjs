@@ -35,7 +35,7 @@ function fixture() {
         saveTranslationRecord: (book, uid, source, text) => { settings.translations[key(book, uid)] = { text, source }; },
         markTranslationSynced: (ui, source, text) => { settings.translations[key(ui.book, ui.uid)] = { source, text }; },
     });
-    vm.runInContext(['deleteSelectedEntries', 'translateCurrentLorebook', 'lorebookEntries', 'hasEntryTranslation', 'syncSourceVisibility'].map(fn).join('\n'), context);
+    vm.runInContext(['mapLimit', 'deleteSelectedEntries', 'translateCurrentLorebook', 'lorebookEntries', 'hasEntryTranslation', 'syncSourceVisibility'].map(fn).join('\n'), context);
     function ui(uid) {
         const row = dom.window.document.createElement('div'); row.dataset.uid = String(uid);
         row.innerHTML = '<div class="world_entry_edit"><div class="slb-content-grid"><div class="slb-source-pane"><textarea></textarea></div><textarea class="translation"></textarea></div></div>';
@@ -93,14 +93,15 @@ test('failed delete save restores entries and original export data without erasi
     } finally { f.close(); }
 });
 
-test('selected translation is sequential, includes off-page entries, and continues after an item fails', async () => {
+test('selected translation runs concurrently, includes off-page entries, and continues after an item fails', async () => {
     const f = fixture();
     try {
         const ui = f.ui(0); let finish;
         f.translate(source => source === 'source 0' ? new Promise(resolve => { finish = resolve; }) : source === 'source 2' ? Promise.reject(new Error('API')) : 'third');
         const pending = f.context.translateCurrentLorebook('selected', f.selection);
         await flush();
-        assert.equal(f.requests.length, 1);
+        assert.equal(f.requests.length, 3);
+        assert.equal(f.settings.translations['A:3'].text, 'third', 'later item finishes before the slow first item');
         finish('first'); await pending;
         assert.deepEqual(f.requests.map(r => r[0]), ['source 0', 'source 2', 'source 3']);
         assert.equal(ui.translation.value, 'first');
@@ -144,5 +145,71 @@ test('source visibility follows actual translation content and toggle without ch
         f.settings.hideOriginalWhenTranslated = true; ui.translation.value = '  \n '; sync();
         assert.equal(pane.classList.contains('slb-source-hidden'), false);
         assert.equal(ui.source.value, 'source 0');
+    } finally { f.close(); }
+});
+
+
+test('three workers refill immediately and out-of-order results reach their own translation fields', async () => {
+    const f = fixture();
+    try {
+        for (const uid of [4, 5]) f.data.entries[uid] = { uid, content: `source ${uid}` };
+        const uis = [0, 2, 3, 4, 5].map(uid => f.ui(uid));
+        const finish = new Map(); let active = 0, peak = 0;
+        f.translate(source => {
+            active++; peak = Math.max(peak, active);
+            return new Promise(resolve => finish.set(source, text => { active--; resolve(text); }));
+        });
+        const pending = f.context.translateCurrentLorebook('selected', { book: 'A', uids: ['0', '2', '3', '4', '5'] });
+        await flush();
+        assert.equal(active, 3); assert.equal(f.requests.length, 3);
+        finish.get('source 2')('translation 2'); await flush();
+        assert.equal(uis[1].translation.value, 'translation 2');
+        assert.equal(uis[0].translation.value, '');
+        assert.equal(f.requests.length, 4, 'next item starts without waiting for all three workers');
+        finish.get('source 4')('translation 4'); await flush();
+        assert.equal(f.requests.length, 5);
+        for (const uid of [5, 3, 0]) { finish.get(`source ${uid}`)(`translation ${uid}`); await flush(); }
+        await pending;
+        assert.equal(peak, 3);
+        for (const ui of uis) {
+            assert.equal(ui.translation.value, `translation ${ui.uid}`);
+            assert.equal(f.settings.translations[key('A', ui.uid)].text, `translation ${ui.uid}`);
+        }
+        assert.equal(f.settings.translations['A:1'], undefined);
+    } finally { f.close(); }
+});
+
+test('cancellation and book switch drain active workers without applying results or starting queued entries', async () => {
+    for (const cancel of ['button', 'book']) {
+        const f = fixture();
+        try {
+            const finish = [];
+            f.translate(() => new Promise(resolve => finish.push(resolve)));
+            const pending = f.context.translateCurrentLorebook('selected', { book: 'A', uids: ['0', '1', '2', '3'] });
+            await flush(); assert.equal(f.requests.length, 3);
+            if (cancel === 'book') f.switchBook();
+            else await f.context.translateCurrentLorebook('selected', f.selection);
+            finish[0]('stale'); await flush();
+            assert.notEqual(f.context.state.bulkTranslation, null, 'job remains owned until in-flight requests settle');
+            finish[1]('stale'); finish[2]('stale'); await pending;
+            assert.equal(f.requests.length, 3);
+            assert.deepEqual(Object.keys(f.settings.translations), []);
+            assert.equal(f.context.state.bulkTranslation, null);
+        } finally { f.close(); }
+    }
+});
+
+test('Google translation keeps one active request', async () => {
+    const f = fixture();
+    try {
+        f.settings.translationProvider = 'google';
+        const finish = [];
+        f.translate(() => new Promise(resolve => finish.push(resolve)));
+        const pending = f.context.translateCurrentLorebook('selected', f.selection);
+        await flush(); assert.equal(f.requests.length, 1);
+        finish[0]('first'); await flush(); assert.equal(f.requests.length, 2);
+        finish[1]('second'); await flush(); assert.equal(f.requests.length, 3);
+        finish[2]('third'); await pending;
+        assert.equal(f.context.state.bulkTranslation, null);
     } finally { f.close(); }
 });
